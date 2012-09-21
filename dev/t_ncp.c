@@ -1,6 +1,12 @@
 #include "net_include.h"
 
+<<<<<<< .mine
+#define BUF_SIZE 1024
+
+int main(int argc, char **argv)
+=======
 int main1()
+>>>>>>> .r9
 {
     struct sockaddr_in host;
     struct hostent     h_ent, *p_h_ent;
@@ -13,6 +19,9 @@ int main1()
     int                mess_len;
     char               mess_buf[MAX_MESS_LEN];
     char               *neto_mess_ptr = &mess_buf[sizeof(mess_len)]; 
+    FILE               *fr; /* Pointer to source file, which we read */
+    int                nread;
+  
 
     s = socket(AF_INET, SOCK_STREAM, 0); /* Create a socket (TCP) */
     if (s<0) {
@@ -50,11 +59,18 @@ int main1()
         exit(1);
     }
 
-    for(;;)
+    /* Open the source file for reading */
+    if((fr = fopen(argv[1], "r")) == NULL) {
+        perror("fopen");
+        exit(0);
+    }
+    printf("Opened %s for reading...\n", argv[1]);
+    
+    while(!feof(fr))
     {
-        printf("enter message: ");
-        scanf("%s",neto_mess_ptr);
-        mess_len = strlen(neto_mess_ptr) + sizeof(mess_len);
+         /* Read in a chunk of the file */
+        nread = fread(neto_mess_ptr, 1, BUF_SIZE, fr);
+        mess_len = nread + sizeof(mess_len);
         memcpy( mess_buf, &mess_len, sizeof(mess_len) );
 
         ret = send( s, mess_buf, mess_len, 0);
@@ -62,7 +78,7 @@ int main1()
         {
             perror( "Net_client: error in writing");
             exit(1);
-        }
+        } 
     }
 
     return 0;
