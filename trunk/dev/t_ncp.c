@@ -1,6 +1,6 @@
 #include "net_include.h"
 
-int main()
+int main1()
 {
     struct sockaddr_in host;
     struct hostent     h_ent, *p_h_ent;
