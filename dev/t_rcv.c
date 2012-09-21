@@ -14,6 +14,11 @@ int main()
     char               mess_buf[MAX_MESS_LEN];
     long               on=1;
 
+    FILE               *fw; /* Pointer to dest file, which we write  */
+    char               *dest_file_name = "/home/rsetrav1/destfile\0";
+    int                nwritten;
+    static unsigned long ct = 0;
+
     s = socket(AF_INET, SOCK_STREAM, 0);
     if (s<0) {
         perror("Net_server: socket");
@@ -40,6 +45,13 @@ int main()
         exit(1);
     }
 
+
+    /* Open or create the destination file for writing */
+    if((fw = fopen(dest_file_name, "w")) == NULL) {
+        perror("fopen");
+        exit(0);
+    }
+
     i = 0;
     FD_ZERO(&mask);
     FD_ZERO(&dummy_mask);
@@ -61,19 +73,27 @@ int main()
                     if( recv(recv_s[j],&mess_len,sizeof(mess_len),0) > 0) {
                         neto_len = mess_len - sizeof(mess_len);
                         recv(recv_s[j], mess_buf, neto_len, 0 );
-                        mess_buf[neto_len] = '\0';
-                    
-                        printf("socket is %d ",j);
-                        printf("len is :%d  message is : %s \n ",
+
+                        /* printf("recieved a message of length :%d \n", neto_len); 
+                        fprintf(stderr, "data: 0x%x, len: %d, fp: 0x%x, ct: %d\n",
+                            mess_buf, neto_len, fw, ct++); */
+                        nwritten = fwrite(mess_buf, 1, neto_len, fw);
+                        /*
+                        printf("successfully wrote message of length :%d \n", nwritten);
+                        //printf("socket is %d ",j);
+                        //printf("len is :%d  message is : %s \n ",
                                mess_len,mess_buf); 
                         printf("---------------- \n");
+                         */
                     }
                     else
                     {
                         printf("closing %d \n",j);
                         FD_CLR(recv_s[j], &mask);
                         close(recv_s[j]);
-                        valid[j] = 0;  
+                        valid[j] = 0;
+                        fclose(fw);
+                        printf("File written to :%s \n", dest_file_name);
                     }
                 }
             }
