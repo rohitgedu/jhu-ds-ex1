@@ -1,12 +1,13 @@
 #include "net_include.h"
 
-<<<<<<< .mine
-#define BUF_SIZE 1024
+
+#define BUF_SIZE 1048
+#define DATA_SIZE 1024
 
 int main(int argc, char **argv)
-=======
-int main1()
->>>>>>> .r9
+
+
+
 {
     struct sockaddr_in host;
     struct hostent     h_ent, *p_h_ent;
@@ -17,11 +18,11 @@ int main1()
     int                s;
     int                ret;
     int                mess_len;
-    char               mess_buf[MAX_MESS_LEN];
+    char               mess_buf[BUF_SIZE];
     char               *neto_mess_ptr = &mess_buf[sizeof(mess_len)]; 
     FILE               *fr; /* Pointer to source file, which we read */
     int                nread;
-  
+    int count = 0;
 
     s = socket(AF_INET, SOCK_STREAM, 0); /* Create a socket (TCP) */
     if (s<0) {
@@ -69,11 +70,12 @@ int main1()
     while(!feof(fr))
     {
          /* Read in a chunk of the file */
-        nread = fread(neto_mess_ptr, 1, BUF_SIZE, fr);
+        nread = fread(neto_mess_ptr, 1, DATA_SIZE, fr);
         mess_len = nread + sizeof(mess_len);
-        memcpy( mess_buf, &mess_len, sizeof(mess_len) );
-
+        memcpy( mess_buf, &nread, sizeof(mess_len) );
+	printf("Message lenght(%d) %d \n", count++, mess_len);
         ret = send( s, mess_buf, mess_len, 0);
+	printf("Message (%d)(%d)(%d)(%d) (%x)(%x)(%x)(%x) \n", mess_buf[0],mess_buf[1],mess_buf[2], mess_buf[3],  mess_buf[4],mess_buf[5],mess_buf[6], mess_buf[7]);
         if(ret != mess_len) 
         {
             perror( "Net_client: error in writing");
@@ -84,4 +86,3 @@ int main1()
     return 0;
 
 }
-
