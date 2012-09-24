@@ -3,7 +3,7 @@
 /*/ #include "time.h" /*/
 
 int gethostname(char*, size_t);
-
+int tempPrint;
 void PromptForHostName(char *my_name, char *host_name, size_t max_len);
 
 /* Data Structures */
@@ -43,6 +43,57 @@ int isValidCumulativeAck(int cumulativeAck, int startWindowIdx, WindowElement *w
     }
 }
 
+void resendNacks(RespPacketHeader *respPktHdr, int *listOfNacks, WindowElement *window,
+                        int ss, struct sockaddr_in *send_addr, int RTT) {
+    /* Resend NACKS logic */
+    int tempCtr = 0, totalLength;
+    for (tempCtr = 0; tempCtr < respPktHdr->numOfNacks; tempCtr++) {
+        int nackWindowIdx = getWindowIdx(listOfNacks[tempCtr]);
+        if (window[nackWindowIdx].isResent == 0) {
+            totalLength = ((SendPacketHeader*) window[getWindowIdx(nackWindowIdx)].sendPkt)->length + sizeof (SendPacketHeader);
+            sendto_dbg(ss, window[getWindowIdx(nackWindowIdx)].sendPkt, totalLength, 0,
+                    (struct sockaddr *) send_addr, sizeof(*send_addr));
+            window[nackWindowIdx].isResent = 1;
+            printf("Resent the SeqNum %d for the first time: \n", listOfNacks[tempCtr]);
+        } else {
+            /* Resend the packets after timeout(RTT) */
+            if (difftime(time(NULL), window[nackWindowIdx].lastSentTime) > RTT) {
+                totalLength = ((SendPacketHeader*) window[getWindowIdx(nackWindowIdx)].sendPkt)->length + sizeof (SendPacketHeader);
+                sendto_dbg(ss, window[getWindowIdx(nackWindowIdx)].sendPkt, totalLength, 0,
+                        (struct sockaddr *) send_addr, sizeof(*send_addr));
+                window[nackWindowIdx].lastSentTime = time(NULL);
+            }
+            printf("Resent the SeqNum %d after timeout: \n", listOfNacks[tempCtr]);
+        }
+    }
+}
+
+
+void printPacket(char* sendPacket) {
+   SendPacketHeader *sendPktHdr = (SendPacketHeader *) sendPacket;
+   char *data = sendPacket + sizeof(SendPacketHeader);
+   int i=0;
+   printf(" %d | %d | %d ", sendPktHdr->packetType, sendPktHdr->seqNum, sendPktHdr->length);
+   /*
+   printf("Data: ");
+   for(i=0; i< 64; i++) {
+       printf("%d=%d ", i, sendPacket[i]);
+   }
+   */
+   printf("\n ");
+}
+
+void printRespPacket(char* respPkt) {
+    int i=0;
+    RespPacketHeader *respPktHdr = (RespPacketHeader *)respPkt;
+    int *listOfNacks = (int*)(respPkt + sizeof(RespPacketHeader));
+    printf(" %d | %d | %d | [", respPktHdr->ackType, respPktHdr->cumulativeAck, respPktHdr->numOfNacks);
+    for(i=0;i<respPktHdr->numOfNacks;i++) {
+        printf("%d ", listOfNacks[i]);
+    }
+    printf("] \n");
+}
+
 int main() {
     struct sockaddr_in name;
     struct sockaddr_in send_addr;
@@ -62,8 +113,8 @@ int main() {
     char mess_buf[MAX_MESS_LEN];
     struct timeval timeout;
 
-    char *destFileName = "destFile\0"; /* TODO */
-    char *sourceFileLocation = "/tmp/hello.txt\0"; /* TODO */
+    char *destFileName = "/tmp/ar/destaaaa.tar\0"; /* TODO */
+    char *sourceFileLocation = "/tmp/aaaa.tar\0"; /* TODO */
     char sendPkt[MAX_BUF_LENGTH];
     SendPacketHeader *sendPktHdr = (SendPacketHeader *) sendPkt;
     WindowElement window[WINDOW_SIZE];
@@ -72,9 +123,13 @@ int main() {
     int windowSlidedBy = WINDOW_SIZE;
     int tempCtr;
     int lastSeqNumSent;
+    int totalLength;
 
-    RespPacketHeader respPktHdr;
-    int listOfNacks[WINDOW_SIZE];
+/*    RespPacketHeader respPktHdr;
+    int listOfNacks[WINDOW_SIZE];*/
+    char respPkt[MAX_BUF_LENGTH];
+    RespPacketHeader *respPktHdr = (RespPacketHeader *) respPkt;
+    int *listOfNacks = (int *)(respPkt + sizeof(RespPacketHeader));
 
     FILE *fr; /* Pointer to source file, which we read */
     int nread;
@@ -119,8 +174,9 @@ int main() {
     /* Send a Init File Transfer packet */
     prepareSendPacketHdr(sendPktHdr, INIT_FILE_TRANSFER, 0, strlen(destFileName));
     memcpy(sendPkt + sizeof (SendPacketHeader), destFileName, strlen(destFileName));
-
-    sendto_dbg_init(0); /* TODO */
+    printPacket(sendPkt);
+    printf("Sending file: %s",sendPkt + sizeof (SendPacketHeader));
+    /*sendto_dbg_init(0); /* TODO */
     sendto_dbg(ss, sendPkt, sendPktHdr->length + sizeof (SendPacketHeader), 0,
             (struct sockaddr *) & send_addr, sizeof (send_addr));
 
@@ -135,11 +191,11 @@ int main() {
         if (num > 0) {
             if (FD_ISSET(sr, &temp_mask)) {
                 from_len = sizeof (from_addr);
-                recvfrom(sr, &respPktHdr, sizeof (respPktHdr), 0,
+                recvfrom(sr, respPktHdr, MAX_BUF_LENGTH, 0,
                         (struct sockaddr *) & from_addr,
                         &from_len);
                 from_ip = from_addr.sin_addr.s_addr;
-                if (respPktHdr.ackType == INIT_FILE_TRANSFER_READY) {
+                if (respPktHdr->ackType == INIT_FILE_TRANSFER_READY) {
                     printf("Received READY from (%d.%d.%d.%d). Starting to transfer file... \n",
                             (htonl(from_ip) & 0xff000000) >> 24,
                             (htonl(from_ip) & 0x00ff0000) >> 16,
@@ -147,7 +203,7 @@ int main() {
                             (htonl(from_ip) & 0x000000ff));
 
                     break;
-                } else if (respPktHdr.ackType == INIT_FILE_TRANSFER_BUSY) {
+                } else if (respPktHdr->ackType == INIT_FILE_TRANSFER_BUSY) {
                     printf("Received BUSY from (%d.%d.%d.%d). \n",
                             (htonl(from_ip) & 0xff000000) >> 24,
                             (htonl(from_ip) & 0x00ff0000) >> 16,
@@ -156,8 +212,8 @@ int main() {
                 }
             }
         } else {
-            sendto_dbg(ss, sendPkt, sendPktHdr->length + sizeof (SendPacketHeader), 0,
-                    (struct sockaddr *) & send_addr, sizeof (send_addr)); /*/ Resend request after timeout /*/
+           /* sendto_dbg(ss, sendPkt, sendPktHdr->length + sizeof (SendPacketHeader), 0,
+                    (struct sockaddr *) & send_addr, sizeof (send_addr)); /* Resend request after timeout */
         }
     }
 
@@ -175,7 +231,8 @@ int main() {
         temp_mask = mask;
         /* Check how much space is left in the window */
         tempCtr = 0;
-        while (tempCtr++ < windowSlidedBy && !feof(fr)) {
+        printf("Sliding window by %d positions... \n", windowSlidedBy);
+        while ((tempCtr++ < windowSlidedBy) && !feof(fr)) {
             /* Read in a chunk of the file */
             incrementSeqNum(&curSeqNum);
             nread = fread(window[getWindowIdx(curSeqNum)].sendPkt + sizeof (SendPacketHeader), 1, MAX_DATA_LENGTH, fr);
@@ -187,29 +244,30 @@ int main() {
                     (struct sockaddr *) & send_addr, sizeof (send_addr));
             lastSeqNumSent = curSeqNum;
         }
-
-        /* If there is something to write, write it */
-        if (nread > 0) {
-
+        printf("Sent %d packets... \n", tempCtr-1);
+        if(feof(fr)) {
+            printf("EOF reached!\n");
         }
 
         /* Check if anything to receive? */
         windowSlidedBy = 0;
-        num = select(FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, 0);
+        timeout.tv_sec = 10;
+        timeout.tv_usec = 0;
+        num = select(FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, &timeout);
         if (num > 0) {
             /* TODO handle resp packets */
             from_len = sizeof (from_addr);
-            recvfrom(sr, &respPktHdr, sizeof (respPktHdr), 0,
+            recvfrom(sr, respPkt, MAX_BUF_LENGTH, 0,
                     (struct sockaddr *) & from_addr, &from_len);
-            recvfrom(sr, listOfNacks, respPktHdr.numOfNacks * sizeof (int), 0,
-                    (struct sockaddr *) & from_addr, &from_len);
-
-            if(respPktHdr.ackType == ACK_DATA_TRANSFER) {
-                if (isValidCumulativeAck(respPktHdr.cumulativeAck, startWindowIdx, window)) {
-                    windowSlidedBy = (modSubtract(respPktHdr.cumulativeAck, getSeqNum(window[startWindowIdx].sendPkt), SEQUENCE_SIZE) + 1) % WINDOW_SIZE;
+            printf("Received packet : ", tempCtr);
+            printRespPacket(respPkt);
+            if(respPktHdr->ackType == ACK_DATA_TRANSFER) {
+                if (isValidCumulativeAck(respPktHdr->cumulativeAck, startWindowIdx, window)) {
+                    windowSlidedBy = (modSubtract(respPktHdr->cumulativeAck, getSeqNum(window[startWindowIdx].sendPkt),
+                            SEQUENCE_SIZE) + 1) % WINDOW_SIZE;
                 }
 
-                if (lastSeqNumSent == respPktHdr.cumulativeAck && feof(fr)) {
+                if (lastSeqNumSent == respPktHdr->cumulativeAck && feof(fr)) {
                     break;
                 }
 
@@ -220,22 +278,13 @@ int main() {
                 }
 
                 /* Resend NACKS logic */
-                for (tempCtr = 0; tempCtr < respPktHdr.numOfNacks; tempCtr++) {
-                    int nackWindowIdx = getWindowIdx(listOfNacks[tempCtr]);
-                    if (window[nackWindowIdx].isResent == 0) {
-                        sendto_dbg(ss, window[getWindowIdx(nackWindowIdx)].sendPkt, nread + sizeof (SendPacketHeader), 0,
-                                (struct sockaddr *) & send_addr, sizeof (send_addr));
-                        window[nackWindowIdx].isResent = 1;
-                    } else {
-                        /* Resend the packets after timeout(RTT) */
-                        if (difftime(time(NULL), window[nackWindowIdx].lastSentTime) > RTT) {
-                            sendto_dbg(ss, window[getWindowIdx(nackWindowIdx)].sendPkt, nread + sizeof (SendPacketHeader), 0,
-                                    (struct sockaddr *) & send_addr, sizeof (send_addr));
-                            window[nackWindowIdx].lastSentTime = time(NULL);
-                        }
-                    }
-                }
+                resendNacks(respPktHdr, listOfNacks, window, ss, &send_addr, RTT);
             }
+        } else {
+            /* This means that the reciever is still waiting for the unacked packets! So, try to resend them. */
+            resendNacks(respPktHdr, listOfNacks, window, ss, &send_addr, RTT);
+            printf(".");
+            fflush(0);
         }
     }
 
@@ -252,10 +301,10 @@ int main() {
         if (num > 0) {
             if (FD_ISSET(sr, &temp_mask)) {
                 from_len = sizeof (from_addr);
-                recvfrom(sr, &respPktHdr, sizeof (respPktHdr), 0,
+                recvfrom(sr, respPktHdr, MAX_BUF_LENGTH, 0,
                         (struct sockaddr *) & from_addr,
                         &from_len);
-                if (respPktHdr.ackType == ACK_FINISHED) {
+                if (respPktHdr->ackType == ACK_FINISHED) {
                     break;
                 }
             }
