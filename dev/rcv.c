@@ -25,7 +25,7 @@ void prepareRespPacketHdr(RespPacketHeader *respPktHdr, int ackType, int cumulat
 int returnGreater(int startIdx,int firstNum, int secondNum, int mod){
     int first= modSubtract(firstNum,startIdx,mod);
     int second= modSubtract(secondNum,startIdx,mod);
-    return first>second?first:second;
+    return ((first>second)?firstNum:secondNum);
 }
 
 int incrementQueueIdx(int queueIdx, int incrementBy) {
@@ -87,6 +87,20 @@ int isValidSeqNum(int seqNum, int startBufferIdx, BufferElement *buffer) {
     }
 }
 
+void printPacket(char* sendPacket) {
+    SendPacketHeader *sendPktHdr = (SendPacketHeader *) sendPacket;
+    char *data = sendPacket + sizeof(SendPacketHeader);
+    int i=0;
+    printf(" Packet type = [%d] ",sendPktHdr->packetType);
+    printf(" Seq number = [%d]",sendPktHdr->seqNum);
+    printf(" length = [%d] \n",sendPktHdr->length);
+    printf("Data: ");
+    for(i=0; i< 64; i++) {
+        printf("%d=%d ", i, sendPacket[i]);
+    }
+    printf("\n ");
+}
+
 int main()
 {
     struct sockaddr_in    name;
@@ -95,7 +109,7 @@ int main()
     socklen_t             from_len;
     struct hostent        h_ent;
     struct hostent        *p_h_ent;
-    char                  host_name[NAME_LENGTH] = {'\0'};
+    char                  host_name[NAME_LENGTH] = "ugrad16\0";
     char                  my_name[NAME_LENGTH] = {'\0'};
     int                   host_num;
     int                   from_ip;
@@ -115,7 +129,7 @@ int main()
     char respPkt[MAX_BUF_LENGTH];
     RespPacketHeader *respPktHdr = (RespPacketHeader *) respPkt;
     int *listOfNacks = (int *)(respPkt + sizeof(RespPacketHeader));
-    int cumulativeAck = -1;
+    int cumulativeAck = SEQUENCE_SIZE - 1;
     int tempSeqNum;
     int tempCtr;
     
@@ -151,9 +165,7 @@ int main()
         exit(1);
     }
     
-    /*/
-    PromptForHostName(my_name,host_name,NAME_LENGTH);
-    
+    /* PromptForHostName(my_name,host_name,NAME_LENGTH); 
     p_h_ent = gethostbyname(host_name);
     if ( p_h_ent == NULL ) {
         printf("Ucast: gethostbyname error.\n");
@@ -163,13 +175,16 @@ int main()
     memcpy( &h_ent, p_h_ent, sizeof(h_ent));
     memcpy( &host_num, h_ent.h_addr_list[0], sizeof(host_num) );
 
+    */
+    
     send_addr.sin_family = AF_INET;
-    send_addr.sin_addr.s_addr = host_num; 
+    send_addr.sin_addr.s_addr = 1541463168L; /* TODO: Handle this properly later */
     send_addr.sin_port = htons(PORT);
-    /*/
+    
 
-    curSenderAddr.sin_addr.s_addr = 0;
-    sendto_dbg_init(0); /* TODO */
+     /* curSenderAddr.sin_addr.s_addr = 0; */
+    curSenderAddr = send_addr;
+    /* sendto_dbg_init(5); TODO */
 
     FD_ZERO( &mask );
     FD_ZERO( &dummy_mask );
@@ -183,7 +198,7 @@ int main()
         if (num > 0) {
             if ( FD_ISSET( sr, &temp_mask) ) {
                 from_len = sizeof(from_addr);
-                bytes = recvfrom( sr, senderPktHdr, sizeof(SendPacketHeader), 0,
+                bytes = recvfrom( sr, senderPkt, MAX_BUF_LENGTH, 0,
                           (struct sockaddr *)&from_addr, 
                           &from_len );
 
@@ -191,10 +206,10 @@ int main()
                         || from_addr.sin_addr.s_addr == curSenderAddr.sin_addr.s_addr) {
                     curSenderAddr.sin_addr.s_addr = from_addr.sin_addr.s_addr;
                     if(senderPktHdr->packetType == INIT_FILE_TRANSFER) {
-                        /*: Read the file name too */
-                        bytes = recvfrom( sr, senderPkt + sizeof(SendPacketHeader), senderPktHdr->length, 0,
-                                  (struct sockaddr *)&from_addr, &from_len );
                         senderPkt[sizeof(SendPacketHeader) + senderPktHdr->length] = 0;
+                        printf("Recieved packet : ");
+                        printPacket(senderPkt);
+                        printf("Request to create a file: %s \n", senderPkt + sizeof(SendPacketHeader));
                         if((fw = fopen(senderPkt + sizeof(SendPacketHeader), "w")) == NULL){
                             perror("fopen");
                             /* Error occured, so pick the next one from the queue */
@@ -213,10 +228,7 @@ int main()
 
                     } else if(senderPktHdr->packetType == FILE_DATA) {
                         if(isValidSeqNum(senderPktHdr->seqNum, startBufferIdx, buffer)) {
-                            /* Read the data and place it into appropritae buffer position */
-                            bytes = recvfrom( sr, buffer[getBufferIdx(senderPktHdr->seqNum)].senderPkt + sizeof(SendPacketHeader),
-                                                    senderPktHdr->length ,0, (struct sockaddr *)&from_addr, &from_len );
-                            memcpy(buffer[getBufferIdx(senderPktHdr->seqNum)].senderPkt, senderPktHdr, sizeof(SendPacketHeader));
+                            memcpy(buffer[getBufferIdx(senderPktHdr->seqNum)].senderPkt, senderPkt, bytes);
                             buffer[getBufferIdx(senderPktHdr->seqNum)].isSpaceUsed = 1;
 
                             if(senderPktHdr->seqNum == getSeqNum(buffer[startBufferIdx].senderPkt)) {
@@ -225,11 +237,16 @@ int main()
                                     nwritten = fwrite(buffer[startBufferIdx].senderPkt + sizeof(SendPacketHeader), 1,
                                             ((SendPacketHeader*)(buffer[startBufferIdx].senderPkt))->length, fw);
                                     buffer[startBufferIdx].isSpaceUsed = 0;
-                                    incrementBufferIdx(&startBufferIdx);
                                     if(lastHighestSeenSeqNum==getSeqNum(buffer[startBufferIdx].senderPkt)){
                                         lastHighestSeenSeqNum = -1;
                                     }
+                                    cumulativeAck = getSeqNum(buffer[startBufferIdx].senderPkt);
+                                    incrementBufferIdx(&startBufferIdx);
                                 }
+
+                                /* Populate Appropriate Sequence Number so that others are valid */
+                                ((SendPacketHeader*)(buffer[startBufferIdx].senderPkt))->seqNum
+                                        = (cumulativeAck + 1) % SEQUENCE_SIZE;
                             } else {
                                 if(lastHighestSeenSeqNum != -1){
                                     lastHighestSeenSeqNum = returnGreater(startBufferIdx, lastHighestSeenSeqNum,
@@ -239,10 +256,10 @@ int main()
                                 }
                             }
                             /* Send Cumulative Ack and Nacks */
-                            cumulativeAck = modSubtract(getSeqNum(buffer[startBufferIdx].senderPkt), 1, SEQUENCE_SIZE);
                             tempSeqNum=getSeqNum(buffer[startBufferIdx].senderPkt);
                             tempCtr=0;
-                            for(; tempSeqNum!=lastHighestSeenSeqNum;incrementBufferIdx(&tempSeqNum)){
+                            for (; lastHighestSeenSeqNum != -1 && tempSeqNum != lastHighestSeenSeqNum;
+                                    incrementSeqNum(&tempSeqNum)) {
                                 if(buffer[getBufferIdx(tempSeqNum)].isSpaceUsed==0){
                                     listOfNacks[tempCtr++] = tempSeqNum;
                                 }
