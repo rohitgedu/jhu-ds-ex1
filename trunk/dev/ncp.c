@@ -1,52 +1,17 @@
-#include "net_include.h"
-#include "sendto_dbg.h"
-#include "time.h"
-
-#define NAME_LENGTH 80
-#define MAX_BUF_LENGTH 1040 /* Actually needed 1036 */
-#define MAX_DATA_LENGTH 1024 /* Actually needed 1036 */
-
-/* Sender Packet Types */
-#define INIT_FILE_TRANSFER 0
-#define FILE_DATA 1
-#define FILE_FINISH 2
-
-/* Response Packet Types */
-#define INIT_FILE_TRANSFER_READY 0
-#define INIT_FILE_TRANSFER_BUSY 1
-#define ACK_DATA_TRANSFER 2
-#define ACK_FINISHED 3
-
-#define WINDOW_SIZE 100
-#define SEQUENCE_SIZE (2*WINDOW_SIZE)
-
+#include "common.h"
+/* #include "sendto_dbg.h" */
+/*/ #include "time.h" /*/
 
 int gethostname(char*, size_t);
 
 void PromptForHostName(char *my_name, char *host_name, size_t max_len);
 
-/* Message Structures */
-struct SendPacketHeader {
-    int packetType;
-    int seqNum;
-    int length;
-};
-typedef struct SendPacketHeader SendPacketHeader;
-
-struct RespPacketHeader {
-    int ackType;
-    int cumulativeAck;
-    int lastSeen;
-    int numOfNacks;
-};
-typedef struct RespPacketHeader RespPacketHeader;
-
 /* Data Structures */
 struct WindowElement {
-    int isSpaceUsed;
     char sendPkt[MAX_BUF_LENGTH];
     time_t lastSentTime;
     int isResent;
+    int isSpaceUsed;
 };
 typedef struct WindowElement WindowElement;
 
@@ -66,15 +31,6 @@ void incrementWindowIdx(int* windowIdx) {
 
 int getWindowIdx(int seqNum) {
     return seqNum % WINDOW_SIZE;
-}
-
-int getSeqNum(char* packet) {
-    SendPacketHeader *hdr = (SendPacketHeader*) packet;
-    return hdr->seqNum;
-}
-
-int modSubtract(int firstNum, int secondNum, int mod) { /* This is firstNUm-secondNum */
-    return (((firstNum - secondNum) % mod) + mod) % mod;
 }
 
 int isValidCumulativeAck(int cumulativeAck, int startWindowIdx, WindowElement *window) {
@@ -173,7 +129,9 @@ int main() {
     FD_SET(sr, &mask);
     for (;;) {
         temp_mask = mask;
-        num = select(FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, NULL);
+        timeout.tv_sec = 10;
+        timeout.tv_usec = 0;
+        num = select(FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, &timeout);
         if (num > 0) {
             if (FD_ISSET(sr, &temp_mask)) {
                 from_len = sizeof (from_addr);
@@ -197,6 +155,9 @@ int main() {
                             (htonl(from_ip) & 0x000000ff));
                 }
             }
+        } else {
+            sendto_dbg(ss, sendPkt, sendPktHdr->length + sizeof (SendPacketHeader), 0,
+                    (struct sockaddr *) & send_addr, sizeof (send_addr)); /*/ Resend request after timeout /*/
         }
     }
 
@@ -243,39 +204,42 @@ int main() {
             recvfrom(sr, listOfNacks, respPktHdr.numOfNacks * sizeof (int), 0,
                     (struct sockaddr *) & from_addr, &from_len);
 
-            if (isValidCumulativeAck(respPktHdr.cumulativeAck, startWindowIdx, window)) {
-                windowSlidedBy = (modSubtract(respPktHdr.cumulativeAck, getSeqNum(window[startWindowIdx].sendPkt), SEQUENCE_SIZE) + 1) % WINDOW_SIZE;
-            }
+            if(respPktHdr.ackType == ACK_DATA_TRANSFER) {
+                if (isValidCumulativeAck(respPktHdr.cumulativeAck, startWindowIdx, window)) {
+                    windowSlidedBy = (modSubtract(respPktHdr.cumulativeAck, getSeqNum(window[startWindowIdx].sendPkt), SEQUENCE_SIZE) + 1) % WINDOW_SIZE;
+                }
 
-            if (lastSeqNumSent == respPktHdr.cumulativeAck && feof(fr)) {
-                break;
-            }
+                if (lastSeqNumSent == respPktHdr.cumulativeAck && feof(fr)) {
+                    break;
+                }
 
-            /* Slide sender window */
-            for (tempCtr = 0; tempCtr < windowSlidedBy; tempCtr++) {
-                window[startWindowIdx].isSpaceUsed = 0;
-                incrementWindowIdx(&startWindowIdx);
-            }
+                /* Slide sender window */
+                for (tempCtr = 0; tempCtr < windowSlidedBy; tempCtr++) {
+                    window[startWindowIdx].isSpaceUsed = 0;
+                    incrementWindowIdx(&startWindowIdx);
+                }
 
-            /* Resend NACKS logic */
-            for (tempCtr = 0; tempCtr < respPktHdr.numOfNacks; tempCtr++) {
-                int nackWindowIdx = getWindowIdx(listOfNacks[tempCtr]);
-                if (window[nackWindowIdx].isResent == 0) {
-                    sendto_dbg(ss, window[getWindowIdx(nackWindowIdx)].sendPkt, nread + sizeof (SendPacketHeader), 0,
-                            (struct sockaddr *) & send_addr, sizeof (send_addr));
-                    window[nackWindowIdx].isResent = 1;
-                } else {
-                    /* Resend the packets after timeout(RTT) */
-                    if (difftime(time(NULL), window[nackWindowIdx].lastSentTime) > RTT) {
+                /* Resend NACKS logic */
+                for (tempCtr = 0; tempCtr < respPktHdr.numOfNacks; tempCtr++) {
+                    int nackWindowIdx = getWindowIdx(listOfNacks[tempCtr]);
+                    if (window[nackWindowIdx].isResent == 0) {
                         sendto_dbg(ss, window[getWindowIdx(nackWindowIdx)].sendPkt, nread + sizeof (SendPacketHeader), 0,
                                 (struct sockaddr *) & send_addr, sizeof (send_addr));
-                        window[nackWindowIdx].lastSentTime = time(NULL);
+                        window[nackWindowIdx].isResent = 1;
+                    } else {
+                        /* Resend the packets after timeout(RTT) */
+                        if (difftime(time(NULL), window[nackWindowIdx].lastSentTime) > RTT) {
+                            sendto_dbg(ss, window[getWindowIdx(nackWindowIdx)].sendPkt, nread + sizeof (SendPacketHeader), 0,
+                                    (struct sockaddr *) & send_addr, sizeof (send_addr));
+                            window[nackWindowIdx].lastSentTime = time(NULL);
+                        }
                     }
                 }
             }
         }
     }
 
+    fclose(fr);
     /* Send a File Finish packet */
     prepareSendPacketHdr(sendPktHdr, FILE_FINISH, 0, 0);
     sendto_dbg(ss, sendPkt, sendPktHdr->length + sizeof (SendPacketHeader), 0,
