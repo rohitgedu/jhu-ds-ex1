@@ -3,6 +3,7 @@
 /*/ #include "time.h" /*/
 
 #define ADDR_QUEUE_SIZE 20
+#define RESPONSE_BURST_SIZE 25
 
 int gethostname(char*, size_t);
 
@@ -15,6 +16,10 @@ struct BufferElement {
 };
 typedef struct BufferElement BufferElement;
 
+void myprintf (__const char *format, ...) {
+   
+}
+
 void prepareRespPacketHdr(RespPacketHeader *respPktHdr, int ackType, int cumulativeAck, int numOfNacks) {
     respPktHdr->ackType = ackType;
     respPktHdr->cumulativeAck = cumulativeAck;
@@ -22,9 +27,9 @@ void prepareRespPacketHdr(RespPacketHeader *respPktHdr, int ackType, int cumulat
     respPktHdr->numOfNacks = numOfNacks;
 }
 
-int returnGreater(int startIdx,int firstNum, int secondNum, int mod){
-    int first= modSubtract(firstNum,startIdx,mod);
-    int second= modSubtract(secondNum,startIdx,mod);
+int returnGreater(int startSeqNum,int firstNum, int secondNum, int mod){
+    int first= modSubtract(firstNum,startSeqNum,mod);
+    int second= modSubtract(secondNum,startSeqNum,mod);
     return ((first>second)?firstNum:secondNum);
 }
 
@@ -88,17 +93,22 @@ int isValidSeqNum(int seqNum, int startBufferIdx, BufferElement *buffer) {
 }
 
 void printPacket(char* sendPacket) {
-    SendPacketHeader *sendPktHdr = (SendPacketHeader *) sendPacket;
-    char *data = sendPacket + sizeof(SendPacketHeader);
+   SendPacketHeader *sendPktHdr = (SendPacketHeader *) sendPacket;
+   char *data = sendPacket + sizeof(SendPacketHeader);
+   int i=0;
+   myprintf(" %d | %d | %d ", sendPktHdr->packetType, sendPktHdr->seqNum, sendPktHdr->length);
+   myprintf("\n ");
+}
+
+void printRespPacket(char* respPkt) {
     int i=0;
-    printf(" Packet type = [%d] ",sendPktHdr->packetType);
-    printf(" Seq number = [%d]",sendPktHdr->seqNum);
-    printf(" length = [%d] \n",sendPktHdr->length);
-    printf("Data: ");
-    for(i=0; i< 64; i++) {
-        printf("%d=%d ", i, sendPacket[i]);
+    RespPacketHeader *respPktHdr = (RespPacketHeader *)respPkt;
+    int *listOfNacks = (int*)(respPkt + sizeof(RespPacketHeader));
+    myprintf(" %d | %d | %d | [", respPktHdr->ackType, respPktHdr->cumulativeAck, respPktHdr->numOfNacks);
+    for(i=0;i<respPktHdr->numOfNacks;i++) {
+        myprintf("%d ", listOfNacks[i]);
     }
-    printf("\n ");
+    myprintf("] \n");
 }
 
 int main(int argc, char **argv)
@@ -121,7 +131,14 @@ int main(int argc, char **argv)
     char                  mess_buf[MAX_MESS_LEN];
     char                  input_buf[80];
     struct timeval        timeout;
-    int lossrate;
+    int                   lossrate;
+    int                   isFileTransferInProgress = 0;
+    int                   isHighestSeqNumSeenDuringWindowSlide = 0;
+    int                   highestSeqNumInWindow = 0;
+    int                   isHighestSeqNumRecomputeRequired = 1;
+    int                   totalElementsInTheWindowToCheck;
+    int                   listOfNacksCtr;
+    int                   burstCtr = 1;
 
     struct sockaddr_in    curSenderAddr;
     char senderPkt[MAX_BUF_LENGTH];
@@ -166,11 +183,19 @@ int main(int argc, char **argv)
         exit(1);
     }
 
-    lossrate = atoi(argv[1]);
+    if(argc < 2) {
+        myprintf("No loss rate specified. Using defaults...\n");
+        sendto_dbg_init(0);
+    } else {
+        lossrate = atoi(argv[1]);
+        sendto_dbg_init(lossrate);
+        myprintf("Loss rate set to %d\%. \n",lossrate);
+    }
+
     /* PromptForHostName(my_name,host_name,NAME_LENGTH); 
     p_h_ent = gethostbyname(host_name);
     if ( p_h_ent == NULL ) {
-        printf("Ucast: gethostbyname error.\n");
+        myprintf("Ucast: gethostbyname error.\n");
         exit(1);
     }
 
@@ -180,21 +205,21 @@ int main(int argc, char **argv)
     */
     
     send_addr.sin_family = AF_INET;
-    send_addr.sin_addr.s_addr = 1541463168L; /* TODO: Handle this properly later */
+    /* send_addr.sin_addr.s_addr = 1541463168L; /* TODO: Handle this properly later */
     send_addr.sin_port = htons(PORT);
     
 
      /* curSenderAddr.sin_addr.s_addr = 0; */
     curSenderAddr = send_addr;
-    sendto_dbg_init(lossrate);
-
+    curSenderAddr.sin_addr.s_addr = 0;
+    
     FD_ZERO( &mask );
     FD_ZERO( &dummy_mask );
     FD_SET( sr, &mask );
     for(;;)
     {
         temp_mask = mask;
-        timeout.tv_sec = 10;
+        timeout.tv_sec = 2;
 	timeout.tv_usec = 0;
         num = select( FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, &timeout);
         if (num > 0) {
@@ -203,15 +228,19 @@ int main(int argc, char **argv)
                 bytes = recvfrom( sr, senderPkt, MAX_BUF_LENGTH, 0,
                           (struct sockaddr *)&from_addr, 
                           &from_len );
+                myprintf("StrtIdx %d(%d) Recieved packet : ", startBufferIdx, getSeqNum(buffer[startBufferIdx].senderPkt));
+                printPacket(senderPkt);
+                if(startBufferIdx != getBufferIdx(getSeqNum(buffer[startBufferIdx].senderPkt))) {
+                    myprintf("There is somethign seriously wrong!!!");
+                    exit(0);
+                }
 
                 if(curSenderAddr.sin_addr.s_addr == 0
                         || from_addr.sin_addr.s_addr == curSenderAddr.sin_addr.s_addr) {
                     curSenderAddr.sin_addr.s_addr = from_addr.sin_addr.s_addr;
                     if(senderPktHdr->packetType == INIT_FILE_TRANSFER) {
                         senderPkt[sizeof(SendPacketHeader) + senderPktHdr->length] = 0;
-                        printf("Recieved packet : ");
-                        printPacket(senderPkt);
-                        printf("Request to create a file: %s \n", senderPkt + sizeof(SendPacketHeader));
+                        myprintf("Request to create a file: %s \n", senderPkt + sizeof(SendPacketHeader));
                         if((fw = fopen(senderPkt + sizeof(SendPacketHeader), "w")) == NULL){
                             perror("fopen");
                             /* Error occured, so pick the next one from the queue */
@@ -227,52 +256,71 @@ int main(int argc, char **argv)
                         prepareRespPacketHdr(respPktHdr, INIT_FILE_TRANSFER_READY, 0, 0);
                         sendto_dbg(ss, respPkt, respPktHdr->numOfNacks*sizeof(int) + sizeof (RespPacketHeader), 0,
                                 (struct sockaddr *) & curSenderAddr, sizeof (curSenderAddr));
+                        isFileTransferInProgress = 1;
 
                     } else if(senderPktHdr->packetType == FILE_DATA) {
                         if(isValidSeqNum(senderPktHdr->seqNum, startBufferIdx, buffer)) {
+                            isHighestSeqNumSeenDuringWindowSlide = 0;
+                            isHighestSeqNumRecomputeRequired = 1;
                             memcpy(buffer[getBufferIdx(senderPktHdr->seqNum)].senderPkt, senderPkt, bytes);
                             buffer[getBufferIdx(senderPktHdr->seqNum)].isSpaceUsed = 1;
 
                             if(senderPktHdr->seqNum == getSeqNum(buffer[startBufferIdx].senderPkt)) {
+                                isHighestSeqNumRecomputeRequired = 0;
                                 while(buffer[startBufferIdx].isSpaceUsed == 1) {
                                     /* Read from buffer and write to the file */
                                     nwritten = fwrite(buffer[startBufferIdx].senderPkt + sizeof(SendPacketHeader), 1,
                                             ((SendPacketHeader*)(buffer[startBufferIdx].senderPkt))->length, fw);
                                     buffer[startBufferIdx].isSpaceUsed = 0;
                                     cumulativeAck = getSeqNum(buffer[startBufferIdx].senderPkt);
+                                    if(getSeqNum(buffer[startBufferIdx].senderPkt) == highestSeqNumInWindow) {
+                                        isHighestSeqNumSeenDuringWindowSlide = 1;
+                                    }
                                     incrementBufferIdx(&startBufferIdx);
                                 }
-
                                 /* Populate Appropriate Sequence Number so that others are valid */
                                 ((SendPacketHeader*)(buffer[startBufferIdx].senderPkt))->seqNum
                                         = (cumulativeAck + 1) % SEQUENCE_SIZE;
-                            }
-                            /* Send Cumulative Ack and Nacks */
-                            tempSeqNum=getSeqNum(buffer[startBufferIdx].senderPkt);
-                            tempCtr=0;
-                            for (; tempSeqNum != senderPktHdr->seqNum; incrementSeqNum(&tempSeqNum)) {
-                                if(buffer[getBufferIdx(tempSeqNum)].isSpaceUsed==0){
-                                    listOfNacks[tempCtr++] = tempSeqNum;
+                                if(isHighestSeqNumSeenDuringWindowSlide == 1) {
+                                    highestSeqNumInWindow = getSeqNum(buffer[startBufferIdx].senderPkt);
                                 }
                             }
-                            prepareRespPacketHdr(respPktHdr,ACK_DATA_TRANSFER,cumulativeAck,tempCtr);
-                            sendto_dbg(ss, respPkt, respPktHdr->numOfNacks * sizeof (int) + sizeof (RespPacketHeader), 0,
-                                    (struct sockaddr *) & curSenderAddr, sizeof (curSenderAddr));
+                            if(isHighestSeqNumRecomputeRequired == 1) {
+                                highestSeqNumInWindow = returnGreater(getSeqNum(buffer[startBufferIdx].senderPkt),
+                                                senderPktHdr->seqNum, highestSeqNumInWindow, SEQUENCE_SIZE);
+                            }
+                            /* Send Cumulative Ack and Nacks */
+                            /* Total Elements in the window to check for unacked packets */
+                            totalElementsInTheWindowToCheck = modSubtract(highestSeqNumInWindow,
+                                                                    getSeqNum(buffer[startBufferIdx].senderPkt), SEQUENCE_SIZE);
+                            
+                            for (listOfNacksCtr = 0, tempCtr=0, tempSeqNum = getSeqNum(buffer[startBufferIdx].senderPkt); tempCtr < totalElementsInTheWindowToCheck; tempCtr++, incrementSeqNum(&tempSeqNum)) {
+                                if(buffer[getBufferIdx(tempSeqNum)].isSpaceUsed==0){
+                                    listOfNacks[listOfNacksCtr++] = tempSeqNum;
+                                }
+                            }
+                            prepareRespPacketHdr(respPktHdr,ACK_DATA_TRANSFER,cumulativeAck,listOfNacksCtr);
+                            /* Send response per RESPONSE_BURST_SIZE */
+                            if(burstCtr++ == RESPONSE_BURST_SIZE) {
+                                sendto_dbg(ss, respPkt, respPktHdr->numOfNacks * sizeof (int) + sizeof (RespPacketHeader), 0,
+                                        (struct sockaddr *) & curSenderAddr, sizeof (curSenderAddr));
+                                burstCtr = 1;
+                            }
+                            myprintf("Sent Response packet : "); printRespPacket(respPkt);
                         }
-                        
-
-
                     } else if(senderPktHdr->packetType == FILE_FINISH) {
                         fclose(fw);
                         prepareRespPacketHdr(respPktHdr, ACK_FINISHED, 0, 0);
                         sendto_dbg(ss, respPkt, respPktHdr->numOfNacks*sizeof(int) + sizeof (RespPacketHeader), 0,
                                 (struct sockaddr *) & curSenderAddr, sizeof (curSenderAddr));
+                        isFileTransferInProgress = 0;
                         /* Pick the next one from the queue */
                         if(!isQueueEmpty(&queueSize)) {
                             curSenderAddr = fetchNextAddrFromQueue(addrQueue, &addrQueueStart, &queueSize);
                             prepareRespPacketHdr(respPktHdr, INIT_FILE_TRANSFER_READY, 0, 0);
                             sendto_dbg(ss, respPkt, respPktHdr->numOfNacks*sizeof(int) + sizeof (RespPacketHeader), 0,
                                     (struct sockaddr *) & curSenderAddr, sizeof (curSenderAddr));
+                            isFileTransferInProgress = 1;
                         } else {
                             curSenderAddr.sin_addr.s_addr = 0;
                         }
@@ -295,8 +343,13 @@ int main(int argc, char **argv)
                 }
             }
 	} else {
-		printf(".");
-		fflush(0);
+            if(isFileTransferInProgress == 1) {
+                sendto_dbg(ss, respPkt, respPktHdr->numOfNacks * sizeof (int) + sizeof (RespPacketHeader), 0,
+                        (struct sockaddr *) & curSenderAddr, sizeof (curSenderAddr));
+                myprintf("Resending Response packet : "); printRespPacket(respPkt);
+            }
+            myprintf(".");
+            fflush(0);
         }
     }
     
@@ -309,9 +362,9 @@ void PromptForHostName( char *my_name, char *host_name, size_t max_len ) {
     char *c;
 
     gethostname(my_name, max_len );
-    printf("My host name is %s.\n", my_name);
+    myprintf("My host name is %s.\n", my_name);
 
-    printf( "\nEnter host to send to:\n" );
+    myprintf( "\nEnter host to send to:\n" );
     if ( fgets(host_name,max_len,stdin) == NULL ) {
         perror("Ucast: read_name");
         exit(1);
@@ -322,6 +375,6 @@ void PromptForHostName( char *my_name, char *host_name, size_t max_len ) {
     c = strchr(host_name,'\r');
     if ( c ) *c = '\0';
 
-    printf( "Sending from %s to %s.\n", my_name, host_name );
+    myprintf( "Sending from %s to %s.\n", my_name, host_name );
 
 }
