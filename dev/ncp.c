@@ -94,15 +94,16 @@ void printRespPacket(char* respPkt) {
     printf("] \n");
 }
 
-int main() {
+int main(int argc, char **argv) {
     struct sockaddr_in name;
     struct sockaddr_in send_addr;
     struct sockaddr_in from_addr;
     socklen_t from_len;
     struct hostent h_ent;
     struct hostent *p_h_ent;
-    char host_name[NAME_LENGTH] = {'\0'};
-    char my_name[NAME_LENGTH] = {'\0'};
+    char *host_name = argv[4];
+    char my_name[NAME_LENGTH] = {'\0'};\
+    int lossrate;
     int host_num;
     int from_ip;
     int ss, sr;
@@ -113,8 +114,8 @@ int main() {
     char mess_buf[MAX_MESS_LEN];
     struct timeval timeout;
 
-    char *destFileName = "/tmp/ar/destaaaa.tar\0"; /* TODO */
-    char *sourceFileLocation = "/tmp/aaaa.tar\0"; /* TODO */
+    char *destFileName = argv[3]; /*  */
+    char *sourceFileLocation = argv[2]; /*  */
     char sendPkt[MAX_BUF_LENGTH];
     SendPacketHeader *sendPktHdr = (SendPacketHeader *) sendPkt;
     WindowElement window[WINDOW_SIZE];
@@ -134,6 +135,8 @@ int main() {
     FILE *fr; /* Pointer to source file, which we read */
     int nread;
     double RTT = 0.002;
+
+    lossrate = atoi(argv[1]);
 
     sr = socket(AF_INET, SOCK_DGRAM, 0); /* socket for receiving (udp) */
     if (sr < 0) {
@@ -156,7 +159,7 @@ int main() {
         exit(1);
     }
 
-    PromptForHostName(my_name, host_name, NAME_LENGTH);
+    /* PromptForHostName(my_name, host_name, NAME_LENGTH); */
 
     p_h_ent = gethostbyname(host_name);
     if (p_h_ent == NULL) {
@@ -176,7 +179,7 @@ int main() {
     memcpy(sendPkt + sizeof (SendPacketHeader), destFileName, strlen(destFileName));
     printPacket(sendPkt);
     printf("Sending file: %s",sendPkt + sizeof (SendPacketHeader));
-    /*sendto_dbg_init(0); /* TODO */
+    sendto_dbg_init(lossrate);
     sendto_dbg(ss, sendPkt, sendPktHdr->length + sizeof (SendPacketHeader), 0,
             (struct sockaddr *) & send_addr, sizeof (send_addr));
 
