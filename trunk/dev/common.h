@@ -45,7 +45,7 @@ typedef struct SendPacketHeader SendPacketHeader;
 struct RespPacketHeader {
     int ackType;
     int cumulativeAck;
-    int lastSeen;
+    int respForSeqNum;
     int numOfNacks;
 };
 typedef struct RespPacketHeader RespPacketHeader;
