@@ -93,6 +93,9 @@ int modSubtract(int firstNum, int secondNum, int mod) { /* This is firstNUm-seco
     return (((firstNum - secondNum) % mod) + mod) % mod;
 }
 
+void incrementSeqNum(int* seqNum) {
+    *seqNum = (*seqNum + 1) % (SEQUENCE_SIZE);
+}
 
 #endif	/* _COMMON_H */
 
