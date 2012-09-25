@@ -14,6 +14,7 @@
 #include <sys/time.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 
 #define NAME_LENGTH 80
 #define MAX_BUF_LENGTH 1040 /* Actually needed 1036 */
@@ -30,7 +31,7 @@
 #define ACK_DATA_TRANSFER 2
 #define ACK_FINISHED 3
 
-#define WINDOW_SIZE 100
+#define WINDOW_SIZE 200
 #define SEQUENCE_SIZE (2*WINDOW_SIZE)
 
 /* Message Structures */
@@ -95,6 +96,12 @@ int modSubtract(int firstNum, int secondNum, int mod) { /* This is firstNUm-seco
 
 void incrementSeqNum(int* seqNum) {
     *seqNum = (*seqNum + 1) % (SEQUENCE_SIZE);
+}
+
+long int computeDiff(struct timeval tv1, struct timeval tv2) {
+    long int milliSecDiff = 1;
+    milliSecDiff = (tv1.tv_sec * 1000 + tv1.tv_usec / 1000) - (tv2.tv_sec * 1000 + tv2.tv_usec / 1000);
+    return milliSecDiff;
 }
 
 #endif	/* _COMMON_H */
