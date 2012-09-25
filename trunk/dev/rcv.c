@@ -101,7 +101,7 @@ void printPacket(char* sendPacket) {
     printf("\n ");
 }
 
-int main()
+int main(int argc, char **argv)
 {
     struct sockaddr_in    name;
     struct sockaddr_in    send_addr;
@@ -121,6 +121,7 @@ int main()
     char                  mess_buf[MAX_MESS_LEN];
     char                  input_buf[80];
     struct timeval        timeout;
+    int lossrate;
 
     struct sockaddr_in    curSenderAddr;
     char senderPkt[MAX_BUF_LENGTH];
@@ -140,7 +141,7 @@ int main()
     BufferElement buffer[WINDOW_SIZE];
     int startBufferIdx = 0;
     int nwritten;
-    int lastHighestSeenSeqNum = -1;
+    /* int lastHighestSeenSeqNum = -1; */
 
     FILE *fw; /* Pointer to dest file, which we write  */
 
@@ -164,7 +165,8 @@ int main()
         perror("Ucast: socket");
         exit(1);
     }
-    
+
+    lossrate = atoi(argv[1]);
     /* PromptForHostName(my_name,host_name,NAME_LENGTH); 
     p_h_ent = gethostbyname(host_name);
     if ( p_h_ent == NULL ) {
@@ -184,7 +186,7 @@ int main()
 
      /* curSenderAddr.sin_addr.s_addr = 0; */
     curSenderAddr = send_addr;
-    /* sendto_dbg_init(5); TODO */
+    sendto_dbg_init(lossrate);
 
     FD_ZERO( &mask );
     FD_ZERO( &dummy_mask );
@@ -237,9 +239,6 @@ int main()
                                     nwritten = fwrite(buffer[startBufferIdx].senderPkt + sizeof(SendPacketHeader), 1,
                                             ((SendPacketHeader*)(buffer[startBufferIdx].senderPkt))->length, fw);
                                     buffer[startBufferIdx].isSpaceUsed = 0;
-                                    if(lastHighestSeenSeqNum==getSeqNum(buffer[startBufferIdx].senderPkt)){
-                                        lastHighestSeenSeqNum = -1;
-                                    }
                                     cumulativeAck = getSeqNum(buffer[startBufferIdx].senderPkt);
                                     incrementBufferIdx(&startBufferIdx);
                                 }
@@ -247,19 +246,11 @@ int main()
                                 /* Populate Appropriate Sequence Number so that others are valid */
                                 ((SendPacketHeader*)(buffer[startBufferIdx].senderPkt))->seqNum
                                         = (cumulativeAck + 1) % SEQUENCE_SIZE;
-                            } else {
-                                if(lastHighestSeenSeqNum != -1){
-                                    lastHighestSeenSeqNum = returnGreater(startBufferIdx, lastHighestSeenSeqNum,
-                                            senderPktHdr->seqNum, SEQUENCE_SIZE);
-                                } else {
-                                    lastHighestSeenSeqNum = senderPktHdr->seqNum;
-                                }
                             }
                             /* Send Cumulative Ack and Nacks */
                             tempSeqNum=getSeqNum(buffer[startBufferIdx].senderPkt);
                             tempCtr=0;
-                            for (; lastHighestSeenSeqNum != -1 && tempSeqNum != lastHighestSeenSeqNum;
-                                    incrementSeqNum(&tempSeqNum)) {
+                            for (; tempSeqNum != senderPktHdr->seqNum; incrementSeqNum(&tempSeqNum)) {
                                 if(buffer[getBufferIdx(tempSeqNum)].isSpaceUsed==0){
                                     listOfNacks[tempCtr++] = tempSeqNum;
                                 }
@@ -267,7 +258,7 @@ int main()
                             prepareRespPacketHdr(respPktHdr,ACK_DATA_TRANSFER,cumulativeAck,tempCtr);
                             sendto_dbg(ss, respPkt, respPktHdr->numOfNacks * sizeof (int) + sizeof (RespPacketHeader), 0,
                                     (struct sockaddr *) & curSenderAddr, sizeof (curSenderAddr));
-                    }
+                        }
                         
 
 
