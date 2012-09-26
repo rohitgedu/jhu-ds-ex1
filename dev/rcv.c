@@ -115,7 +115,7 @@ void printRespPacket(char* respPkt) {
 int main(int argc, char **argv)
 {
     struct sockaddr_in    name;
-    struct sockaddr_in    send_addr;
+    struct sockaddr_in    zeroAddr;
     struct sockaddr_in    from_addr;
     socklen_t             from_len;
     struct hostent        h_ent;
@@ -201,25 +201,12 @@ int main(int argc, char **argv)
         myprintf("Loss rate set to %d\%. \n",lossrate);
     }
 
-    /* PromptForHostName(my_name,host_name,NAME_LENGTH); 
-    p_h_ent = gethostbyname(host_name);
-    if ( p_h_ent == NULL ) {
-        myprintf("Rcv: gethostbyname error.\n");
-        exit(1);
-    }
-
-    memcpy( &h_ent, p_h_ent, sizeof(h_ent));
-    memcpy( &host_num, h_ent.h_addr_list[0], sizeof(host_num) );
-
-    */
-    
-    send_addr.sin_family = AF_INET;
-    send_addr.sin_port = htons(PORT);
-    
+    zeroAddr.sin_family = AF_INET;
+    zeroAddr.sin_addr.s_addr = 0;
+    zeroAddr.sin_port = htons(PORT);
 
      /* curSenderAddr.sin_addr.s_addr = 0; */
-    curSenderAddr = send_addr;
-    curSenderAddr.sin_addr.s_addr = 0;
+    curSenderAddr = zeroAddr;
     
     FD_ZERO( &mask );
     FD_ZERO( &dummy_mask );
@@ -228,7 +215,7 @@ int main(int argc, char **argv)
     {
         temp_mask = mask;
         timeout.tv_sec = 0;
-	timeout.tv_usec = 5000;
+	timeout.tv_usec = 5000; /* Wait for Sender's response for a maximum of 5 milliseconds */
         num = select( FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, &timeout);
         if (num > 0) {
             if ( FD_ISSET( sr, &temp_mask) ) {
@@ -242,13 +229,12 @@ int main(int argc, char **argv)
                     myprintf("There is something seriously wrong!!!");
                     exit(0);
                 }
-
                 if(curSenderAddr.sin_addr.s_addr == 0
                         || from_addr.sin_addr.s_addr == curSenderAddr.sin_addr.s_addr) {
                     curSenderAddr.sin_addr.s_addr = from_addr.sin_addr.s_addr;
                     if(senderPktHdr->packetType == INIT_FILE_TRANSFER) {
                         senderPkt[sizeof(SendPacketHeader) + senderPktHdr->length] = 0;
-                        myprintf("Request to create a file: %s \n", senderPkt + sizeof(SendPacketHeader));
+                        printf("Request to create a file: %s \n", senderPkt + sizeof(SendPacketHeader));
                         if((fw = fopen(senderPkt + sizeof(SendPacketHeader), "w")) == NULL){
                             perror("fopen");
                             /* Error occured, so pick the next one from the queue */
@@ -352,6 +338,7 @@ int main(int argc, char **argv)
                         /* Pick the next one from the queue */
                         if(!isQueueEmpty(&queueSize)) {
                             tempSenderAddr = fetchNextAddrFromQueue(addrQueue, &addrQueueStart, &queueSize);
+                            curSenderAddr = zeroAddr; /* reinitialize curSenderAddr to 0 */
                             curSenderAddr.sin_addr.s_addr = tempSenderAddr.sin_addr.s_addr;
                             prepareRespPacketHdr(respPktHdr, INIT_FILE_TRANSFER_READY, 0, 0, 0);
                             sendto_dbg(ss, respPkt, respPktHdr->numOfNacks*sizeof(int) + sizeof (RespPacketHeader), 0,
@@ -361,7 +348,7 @@ int main(int argc, char **argv)
                             burstCtr = 1;
                             isFirstWrite = 1;
                         } else {
-                            curSenderAddr.sin_addr.s_addr = 0;
+                            curSenderAddr = zeroAddr; /* reinitialize curSenderAddr to 0 */
                         }
                     }
                 } else {
@@ -423,3 +410,12 @@ void PromptForHostName( char *my_name, char *host_name, size_t max_len ) {
     myprintf( "Sending from %s to %s.\n", my_name, host_name );
 
 }
+
+
+/*
+                        destFileName = &(senderPkt[sizeof(SendPacketHeader)]);
+                        for(tempCtr = sizeof(SendPacketHeader); senderPkt[tempCtr]!='@'; tempCtr++);
+                        senderPkt[tempCtr]='\0';
+                        senderHostName = &(senderPkt[tempCtr+1]);
+                        getHostB
+ */
