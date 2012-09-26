@@ -31,7 +31,7 @@
 #define ACK_DATA_TRANSFER 2
 #define ACK_FINISHED 3
 
-#define WINDOW_SIZE 200
+#define WINDOW_SIZE 100
 #define SEQUENCE_SIZE (2*WINDOW_SIZE)
 
 /* Message Structures */
