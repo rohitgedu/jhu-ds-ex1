@@ -225,12 +225,20 @@ int main(int argc, char **argv) {
         exit(1);
     }
 
-    memcpy(&h_ent, p_h_ent, sizeof (h_ent)); /* Destination Host Entity */
-    memcpy(&host_num, h_ent.h_addr_list[0], sizeof (host_num)); /* Destination Host Address */
+    memcpy(&h_ent, p_h_ent, sizeof (h_ent)); 
+    memcpy(&host_num, h_ent.h_addr_list[0], sizeof (host_num));
 
     send_addr.sin_family = AF_INET;
     send_addr.sin_addr.s_addr = host_num;
     send_addr.sin_port = htons(PORT);
+
+    /*
+    prepareSendPacketHdr(sendPktHdr, INIT_FILE_TRANSFER, 0, strlen(destFileName) + 1 + strlen(my_name));
+    memcpy(sendPkt + sizeof(SendPacketHeader), destFileName, strlen(destFileName));
+    memcpy(sendPkt + sizeof(SendPacketHeader) strlen(destFileName) + 1, '@' , 1);
+    memcpy(sendPkt + sizeof(SendPacketHeader) strlen(destFileName) + 2, my_name, strlen(my_name));
+    memcpy(sendPkt + sizeof(SendPacketHeader) strlen(destFileName) + 3, '\0', 1);
+    */
 
     /* Send a Init File Transfer packet */
     prepareSendPacketHdr(sendPktHdr, INIT_FILE_TRANSFER, 0, strlen(destFileName));
@@ -240,6 +248,7 @@ int main(int argc, char **argv) {
     sendto_dbg(ss, sendPkt, sendPktHdr->length + sizeof (SendPacketHeader), 0,
             (struct sockaddr *) & send_addr, sizeof (send_addr));
 
+    FD_ZERO(&mask);
     FD_ZERO(&dummy_mask);
     FD_SET(sr, &mask);
     for (;;) {
@@ -255,7 +264,7 @@ int main(int argc, char **argv) {
                         &from_len);
                 from_ip = from_addr.sin_addr.s_addr;
                 if (respPktHdr->ackType == INIT_FILE_TRANSFER_READY) {
-                    myprintf("Received READY from (%d.%d.%d.%d). Starting to transfer file... \n",
+                    printf("Received READY from (%d.%d.%d.%d). Starting to transfer file... \n",
                             (htonl(from_ip) & 0xff000000) >> 24,
                             (htonl(from_ip) & 0x00ff0000) >> 16,
                             (htonl(from_ip) & 0x0000ff00) >> 8,
@@ -380,7 +389,7 @@ int main(int argc, char **argv) {
         }
     }
     gettimeofday(&(endTime), NULL);
-    printf("Time taken in milliseconds :%ld", computeDiff(endTime, beginTime));
+    printf("Time taken :%ld ms\n", computeDiff(endTime, beginTime));
     fclose(fr);
     /* Send a File Finish packet */
     prepareSendPacketHdr(sendPktHdr, FILE_FINISH, 0, 0);
@@ -391,7 +400,7 @@ int main(int argc, char **argv) {
         timeout.tv_sec = 10;
         timeout.tv_usec = 0;
         num = select(FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, &timeout);
-        printf("Waiting for FINACK response\n");
+        printf("Waiting for ACK_FINISHED\n");
         if (num > 0) {
             if (FD_ISSET(sr, &temp_mask)) {
                 from_len = sizeof (from_addr);
@@ -399,15 +408,13 @@ int main(int argc, char **argv) {
                         (struct sockaddr *) & from_addr,
                         &from_len);
                 
-                printf("Received something:");
-                printf(" %d | %d | %d | %d \n", respPktHdr->ackType, respPktHdr->cumulativeAck, respPktHdr->numOfNacks, respPktHdr->respForSeqNum);
                 if (respPktHdr->ackType == ACK_FINISHED) {
-                    printf("Received ACK_FINISH\n");
+                    printf("Received ACK_FINISHED\n");
                     break;
                 }
             }
         } else {
-            printf("resending FINACK\n");
+            printf("Resending FILE_FINISH\n");
             prepareSendPacketHdr(sendPktHdr, FILE_FINISH, 0, 0);
             sendto_dbg(ss, sendPkt, sendPktHdr->length + sizeof (SendPacketHeader), 0,
                     (struct sockaddr *) & send_addr, sizeof (send_addr));
