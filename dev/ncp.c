@@ -1,7 +1,7 @@
 #include "common.h"
 
 #define BURST_SIZE 1
-#define RTT 3 /* RTT is in milli seconds */
+#define RTT 2 /* RTT is in milli seconds */
 
 int gethostname(char*, size_t);
 int tempPrint;
@@ -17,7 +17,7 @@ struct WindowElement {
 };
 typedef struct WindowElement WindowElement;
 
-void myprintf(__const char *format, ...) {
+void myprintf (__const char *format, ...) {
 
 }
 
@@ -83,7 +83,7 @@ void resendNacks(RespPacketHeader *respPktHdr, int *listOfNacks, WindowElement *
             window[nackWindowIdx].isResent = 1;
             window[nackWindowIdx].lastSeqNumSentDuringRetransmit = lastSeqNumSentDuringRetransmit;
             gettimeofday(&(window[nackWindowIdx].lastSentTime), NULL);
-            printf("Resent the SeqNum %d for the first time: \n", listOfNacks[tempCtr]);
+            myprintf("Resent the SeqNum %d for the first time: \n", listOfNacks[tempCtr]);
         } else {
             /* Resend only if the respForSeqNum is greater than lastSeqNumSentDuringRetransmit */
             if(isGreater(getSeqNum(window[startWindowIdx].sendPkt),
@@ -94,7 +94,7 @@ void resendNacks(RespPacketHeader *respPktHdr, int *listOfNacks, WindowElement *
                 window[nackWindowIdx].isResent = 1;
                 window[nackWindowIdx].lastSeqNumSentDuringRetransmit = lastSeqNumSentDuringRetransmit;
                 gettimeofday(&(window[nackWindowIdx].lastSentTime), NULL);
-                printf("Retransmit the SeqNum %d in the subsequent time: \n", listOfNacks[tempCtr]);
+                myprintf("Retransmit the SeqNum %d in the subsequent time: \n", listOfNacks[tempCtr]);
             } else {
                 /* Resend the packets after timeout(RTT) */
                 gettimeofday(&curTime, NULL);
@@ -103,9 +103,9 @@ void resendNacks(RespPacketHeader *respPktHdr, int *listOfNacks, WindowElement *
                     sendto_dbg(ss, window[getWindowIdx(nackWindowIdx)].sendPkt, totalLength, 0,
                             (struct sockaddr *) send_addr, sizeof (*send_addr));
                     gettimeofday(&(window[nackWindowIdx].lastSentTime), NULL);
-                    printf("Resent the SeqNum %d after timeout: \n", listOfNacks[tempCtr]);
+                    myprintf("Resent the SeqNum %d after timeout: \n", listOfNacks[tempCtr]);
                 } else {
-                    printf("Not-resending the SeqNum %d because no timeout:(%ld) \n", listOfNacks[tempCtr],computeDiff(curTime, window[nackWindowIdx].lastSentTime));
+                    myprintf("Not-resending the SeqNum %d because no timeout:(%ld) \n", listOfNacks[tempCtr],computeDiff(curTime, window[nackWindowIdx].lastSentTime));
                 }
             }
         }
@@ -116,28 +116,28 @@ void printPacket(char* sendPacket) {
     SendPacketHeader *sendPktHdr = (SendPacketHeader *) sendPacket;
     char *data = sendPacket + sizeof (SendPacketHeader);
     int i = 0;
-    printf(" %d | %d | %d ", sendPktHdr->packetType, sendPktHdr->seqNum, sendPktHdr->length);
+    myprintf(" %d | %d | %d ", sendPktHdr->packetType, sendPktHdr->seqNum, sendPktHdr->length);
     /*
-    myprintf("Data: ");
+    mymyprintf("Data: ");
     for(i=0; i< 64; i++) {
-        myprintf("%d=%d ", i, sendPacket[i]);
+        mymyprintf("%d=%d ", i, sendPacket[i]);
     }
      */
-    printf("\n ");
+    myprintf("\n ");
 }
 
 void printRespPacket(char* respPkt) {
     int i = 0;
     RespPacketHeader *respPktHdr = (RespPacketHeader *) respPkt;
     int *listOfNacks = (int*) (respPkt + sizeof (RespPacketHeader));
-    printf(" %d | %d | %d | %d [", respPktHdr->ackType, respPktHdr->cumulativeAck, respPktHdr->respForSeqNum, respPktHdr->numOfNacks);
+    myprintf(" %d | %d | %d | %d [", respPktHdr->ackType, respPktHdr->cumulativeAck, respPktHdr->respForSeqNum, respPktHdr->numOfNacks);
     for (i = 0; i < respPktHdr->numOfNacks; i++) {
-        printf("%d ", listOfNacks[i]);
+        myprintf("%d ", listOfNacks[i]);
     }
-    printf("] \n");
+    myprintf("] \n");
 }
 
-int main() {
+int main(int argc, char **argv) {
     struct sockaddr_in name;
     struct sockaddr_in send_addr;
     struct sockaddr_in from_addr;
@@ -171,6 +171,7 @@ int main() {
     int totalLength;
     struct timeval beginTime, endTime;
     int isResendNacks = 0;
+    int lossrate;
 
     /*    RespPacketHeader respPktHdr;
         int listOfNacks[WINDOW_SIZE];*/
@@ -202,11 +203,20 @@ int main() {
         exit(1);
     }
 
+    if(argc < 2) {
+        myprintf("No loss rate specified. Using defaults...\n");
+        sendto_dbg_init(0);
+    } else {
+        lossrate = atoi(argv[1]);
+        sendto_dbg_init(lossrate);
+        myprintf("Loss rate set to %d\%. \n",lossrate);
+    }
+
     PromptForHostName(my_name, host_name, NAME_LENGTH);
 
     p_h_ent = gethostbyname(host_name);
     if (p_h_ent == NULL) {
-        printf("Ucast: gethostbyname error.\n");
+        myprintf("Ucast: gethostbyname error.\n");
         exit(1);
     }
 
@@ -221,8 +231,7 @@ int main() {
     prepareSendPacketHdr(sendPktHdr, INIT_FILE_TRANSFER, 0, strlen(destFileName));
     memcpy(sendPkt + sizeof (SendPacketHeader), destFileName, strlen(destFileName));
     printPacket(sendPkt);
-    printf("Sending file: %s", sendPkt + sizeof (SendPacketHeader));
-    sendto_dbg_init(25); /* TODO */
+    myprintf("Sending file: %s", sendPkt + sizeof (SendPacketHeader));
     sendto_dbg(ss, sendPkt, sendPktHdr->length + sizeof (SendPacketHeader), 0,
             (struct sockaddr *) & send_addr, sizeof (send_addr));
 
@@ -242,7 +251,7 @@ int main() {
                         &from_len);
                 from_ip = from_addr.sin_addr.s_addr;
                 if (respPktHdr->ackType == INIT_FILE_TRANSFER_READY) {
-                    printf("Received READY from (%d.%d.%d.%d). Starting to transfer file... \n",
+                    myprintf("Received READY from (%d.%d.%d.%d). Starting to transfer file... \n",
                             (htonl(from_ip) & 0xff000000) >> 24,
                             (htonl(from_ip) & 0x00ff0000) >> 16,
                             (htonl(from_ip) & 0x0000ff00) >> 8,
@@ -250,7 +259,7 @@ int main() {
 
                     break;
                 } else if (respPktHdr->ackType == INIT_FILE_TRANSFER_BUSY) {
-                    printf("Received BUSY from (%d.%d.%d.%d). \n",
+                    myprintf("Received BUSY from (%d.%d.%d.%d). \n",
                             (htonl(from_ip) & 0xff000000) >> 24,
                             (htonl(from_ip) & 0x00ff0000) >> 16,
                             (htonl(from_ip) & 0x0000ff00) >> 8,
@@ -270,7 +279,7 @@ int main() {
         perror("fopen error");
         exit(0);
     }
-    printf("Opened %s for reading...\n", sourceFileLocation);
+    myprintf("Opened %s for reading...\n", sourceFileLocation);
 
     maxSendRemaining = WINDOW_SIZE;
     for (;;) {
@@ -286,7 +295,7 @@ int main() {
             window[getWindowIdx(curSeqNum)].isResent = 0;
             sendto_dbg(ss, window[getWindowIdx(curSeqNum)].sendPkt, nread + sizeof (SendPacketHeader), 0,
                     (struct sockaddr *) & send_addr, sizeof (send_addr));
-            printf("Sent packet : ");
+            myprintf("Sent packet : ");
             printPacket(window[getWindowIdx(curSeqNum)].sendPkt);
             lastSeqNumSent = curSeqNum;
             maxSendRemaining--;
@@ -295,9 +304,11 @@ int main() {
                 break;
             }
         }
+/*
         if (feof(fr)) {
             break;
         }
+*/
 
         temp_mask = mask;
         timeout.tv_sec = 0;
@@ -309,7 +320,7 @@ int main() {
                 from_len = sizeof (from_addr);
                 recvfrom(sr, respPkt, MAX_BUF_LENGTH, 0,
                         (struct sockaddr *) & from_addr, &from_len);
-                printf("%d %d Received packet : ", startWindowIdx, maxSendRemaining);
+                myprintf("%d %d Received packet : ", startWindowIdx, maxSendRemaining);
                 printRespPacket(respPkt);
                 if (respPktHdr->ackType == ACK_DATA_TRANSFER) {
                     /* Check if this is a valid CumulativeAck */
@@ -330,6 +341,7 @@ int main() {
                         maxSendRemaining++;
                     }
                     if (lastSeqNumSent == respPktHdr->cumulativeAck && feof(fr)) {
+                        printf("Breaking \n");
                         break;
                     }
                     if (isResendNacks == 1) {
@@ -352,17 +364,23 @@ int main() {
         timeout.tv_sec = 10;
         timeout.tv_usec = 0;
         num = select(FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, &timeout);
+        printf("Waiting for FINACK response\n");
         if (num > 0) {
             if (FD_ISSET(sr, &temp_mask)) {
                 from_len = sizeof (from_addr);
                 recvfrom(sr, respPktHdr, MAX_BUF_LENGTH, 0,
                         (struct sockaddr *) & from_addr,
                         &from_len);
+                
+                printf("Received something:");
+                printf(" %d | %d | %d | %d \n", respPktHdr->ackType, respPktHdr->cumulativeAck, respPktHdr->numOfNacks, respPktHdr->respForSeqNum);
                 if (respPktHdr->ackType == ACK_FINISHED) {
+                    printf("Received ACK_FINISH\n");
                     break;
                 }
             }
         } else {
+            printf("resending FINACK\n");
             prepareSendPacketHdr(sendPktHdr, FILE_FINISH, 0, 0);
             sendto_dbg(ss, sendPkt, sendPktHdr->length + sizeof (SendPacketHeader), 0,
                     (struct sockaddr *) & send_addr, sizeof (send_addr));
@@ -376,9 +394,9 @@ void PromptForHostName(char *my_name, char *host_name, size_t max_len) {
     char *c;
 
     gethostname(my_name, max_len);
-    printf("My host name is %s.\n", my_name);
+    myprintf("My host name is %s.\n", my_name);
 
-    printf("\nEnter host to send to:\n");
+    myprintf("\nEnter host to send to:\n");
     if (fgets(host_name, max_len, stdin) == NULL) {
         perror("Ucast: read_name");
         exit(1);
@@ -389,6 +407,6 @@ void PromptForHostName(char *my_name, char *host_name, size_t max_len) {
     c = strchr(host_name, '\r');
     if (c) *c = '\0';
 
-    printf("Sending from %s to %s.\n", my_name, host_name);
+    myprintf("Sending from %s to %s.\n", my_name, host_name);
 
 }
