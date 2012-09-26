@@ -3,9 +3,9 @@
 #define BURST_SIZE 1
 #define RTT 2 /* RTT is in milli seconds */
 
+void reformatHostName(char *host_name, size_t max_len);
+
 int gethostname(char*, size_t);
-int tempPrint;
-void PromptForHostName(char *my_name, char *host_name, size_t max_len);
 
 /* Data Structures */
 struct WindowElement {
@@ -144,7 +144,7 @@ int main(int argc, char **argv) {
     socklen_t from_len;
     struct hostent h_ent;
     struct hostent *p_h_ent;
-    char host_name[NAME_LENGTH] = {'\0'};
+    char *host_name;
     char my_name[NAME_LENGTH] = {'\0'};
     int host_num;
     int from_ip;
@@ -184,9 +184,21 @@ int main(int argc, char **argv) {
     FILE *fr; /* Pointer to source file, which we read */
     int nread;
 
+    if(argc != 4) {
+        printf("Usage: ncp <loss_rate> <source_file_name> <dest_file_name>@<comp_name> \n");
+        exit(1);
+    }
+    lossrate = atoi(argv[1]);
+    sendto_dbg_init(lossrate);
+    sourceFileLocation = argv[2];
+    destFileName = argv[3];
+    for(tempCtr = 0; argv[3][tempCtr]!='@'; tempCtr++); /* move till @ character */
+    argv[3][tempCtr] = '\0'; /* end of destination file name */
+    host_name = &(argv[3][tempCtr+1]);
+
     sr = socket(AF_INET, SOCK_DGRAM, 0); /* socket for receiving (udp) */
     if (sr < 0) {
-        perror("Ucast: socket");
+        perror("Ncp: socket");
         exit(1);
     }
 
@@ -195,30 +207,21 @@ int main(int argc, char **argv) {
     name.sin_port = htons(PORT);
 
     if (bind(sr, (struct sockaddr *) & name, sizeof (name)) < 0) {
-        perror("Ucast: bind");
+        perror("Ncp: bind");
         exit(1);
     }
 
     ss = socket(AF_INET, SOCK_DGRAM, 0); /* socket for sending (udp) */
     if (ss < 0) {
-        perror("Ucast: socket");
+        perror("Ncp: socket");
         exit(1);
     }
 
-    if(argc < 2) {
-        myprintf("No loss rate specified. Using defaults...\n");
-        sendto_dbg_init(0);
-    } else {
-        lossrate = atoi(argv[1]);
-        sendto_dbg_init(lossrate);
-        myprintf("Loss rate set to %d\%. \n",lossrate);
-    }
-
-    PromptForHostName(my_name, host_name, NAME_LENGTH);
+    reformatHostName(host_name, NAME_LENGTH);
 
     p_h_ent = gethostbyname(host_name);
     if (p_h_ent == NULL) {
-        myprintf("Ucast: gethostbyname error.\n");
+        myprintf("Ncp: gethostbyname error.\n");
         exit(1);
     }
 
@@ -236,7 +239,6 @@ int main(int argc, char **argv) {
     myprintf("Sending file: %s", sendPkt + sizeof (SendPacketHeader));
     sendto_dbg(ss, sendPkt, sendPktHdr->length + sizeof (SendPacketHeader), 0,
             (struct sockaddr *) & send_addr, sizeof (send_addr));
-
 
     FD_ZERO(&dummy_mask);
     FD_SET(sr, &mask);
@@ -414,24 +416,11 @@ int main(int argc, char **argv) {
     return 0;
 }
 
-void PromptForHostName(char *my_name, char *host_name, size_t max_len) {
-
+void reformatHostName(char *host_name, size_t max_len) {
     char *c;
-
-    gethostname(my_name, max_len);
-    myprintf("My host name is %s.\n", my_name);
-
-    myprintf("\nEnter host to send to:\n");
-    if (fgets(host_name, max_len, stdin) == NULL) {
-        perror("Ucast: read_name");
-        exit(1);
-    }
-
     c = strchr(host_name, '\n');
     if (c) *c = '\0';
     c = strchr(host_name, '\r');
     if (c) *c = '\0';
-
-    myprintf("Sending from %s to %s.\n", my_name, host_name);
 
 }
