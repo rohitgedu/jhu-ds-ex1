@@ -4,7 +4,7 @@
 
 #define ADDR_QUEUE_SIZE 20
 #define RESPONSE_BURST_SIZE 25
-#define RESPONSE_BURST_TIME 2 /* in mill seconds */
+#define RESPONSE_BURST_TIME 5 /* in mill seconds */
 
 int gethostname(char*, size_t);
 
@@ -97,19 +97,19 @@ void printPacket(char* sendPacket) {
    SendPacketHeader *sendPktHdr = (SendPacketHeader *) sendPacket;
    char *data = sendPacket + sizeof(SendPacketHeader);
    int i=0;
-   printf(" %d | %d | %d ", sendPktHdr->packetType, sendPktHdr->seqNum, sendPktHdr->length);
-   printf("\n ");
+   myprintf(" %d | %d | %d ", sendPktHdr->packetType, sendPktHdr->seqNum, sendPktHdr->length);
+   myprintf("\n ");
 }
 
 void printRespPacket(char* respPkt) {
     int i=0;
     RespPacketHeader *respPktHdr = (RespPacketHeader *)respPkt;
     int *listOfNacks = (int*)(respPkt + sizeof(RespPacketHeader));
-    printf(" %d | %d | %d | %d [", respPktHdr->ackType, respPktHdr->cumulativeAck, respPktHdr->respForSeqNum, respPktHdr->numOfNacks);
+    myprintf(" %d | %d | %d | %d [", respPktHdr->ackType, respPktHdr->cumulativeAck, respPktHdr->respForSeqNum, respPktHdr->numOfNacks);
     for(i=0;i<respPktHdr->numOfNacks;i++) {
-        printf("%d ", listOfNacks[i]);
+        myprintf("%d ", listOfNacks[i]);
     }
-    printf("] \n");
+    myprintf("] \n");
 }
 
 int main(int argc, char **argv)
@@ -188,18 +188,18 @@ int main(int argc, char **argv)
     }
 
     if(argc < 2) {
-        printf("No loss rate specified. Using defaults...\n");
+        myprintf("No loss rate specified. Using defaults...\n");
         sendto_dbg_init(0);
     } else {
         lossrate = atoi(argv[1]);
         sendto_dbg_init(lossrate);
-        printf("Loss rate set to %d\%. \n",lossrate);
+        myprintf("Loss rate set to %d\%. \n",lossrate);
     }
 
     /* PromptForHostName(my_name,host_name,NAME_LENGTH); 
     p_h_ent = gethostbyname(host_name);
     if ( p_h_ent == NULL ) {
-        printf("Ucast: gethostbyname error.\n");
+        myprintf("Ucast: gethostbyname error.\n");
         exit(1);
     }
 
@@ -223,8 +223,8 @@ int main(int argc, char **argv)
     for(;;)
     {
         temp_mask = mask;
-        timeout.tv_sec = 2;
-	timeout.tv_usec = 0;
+        timeout.tv_sec = 0;
+	timeout.tv_usec = 5000;
         num = select( FD_SETSIZE, &temp_mask, &dummy_mask, &dummy_mask, &timeout);
         if (num > 0) {
             if ( FD_ISSET( sr, &temp_mask) ) {
@@ -232,10 +232,10 @@ int main(int argc, char **argv)
                 bytes = recvfrom( sr, senderPkt, MAX_BUF_LENGTH, 0,
                           (struct sockaddr *)&from_addr, 
                           &from_len );
-                printf("StrtIdx %d(%d) Recieved packet : ", startBufferIdx, getSeqNum(buffer[startBufferIdx].senderPkt));
+                myprintf("StrtIdx %d(%d) Recieved packet : ", startBufferIdx, getSeqNum(buffer[startBufferIdx].senderPkt));
                 printPacket(senderPkt);
                 if(startBufferIdx != getBufferIdx(getSeqNum(buffer[startBufferIdx].senderPkt))) {
-                    printf("There is somethign seriously wrong!!!");
+                    myprintf("There is something seriously wrong!!!");
                     exit(0);
                 }
 
@@ -244,7 +244,7 @@ int main(int argc, char **argv)
                     curSenderAddr.sin_addr.s_addr = from_addr.sin_addr.s_addr;
                     if(senderPktHdr->packetType == INIT_FILE_TRANSFER) {
                         senderPkt[sizeof(SendPacketHeader) + senderPktHdr->length] = 0;
-                        printf("Request to create a file: %s \n", senderPkt + sizeof(SendPacketHeader));
+                        myprintf("Request to create a file: %s \n", senderPkt + sizeof(SendPacketHeader));
                         if((fw = fopen(senderPkt + sizeof(SendPacketHeader), "w")) == NULL){
                             perror("fopen");
                             /* Error occured, so pick the next one from the queue */
@@ -309,15 +309,16 @@ int main(int argc, char **argv)
                                 prepareRespPacketHdr(respPktHdr,ACK_DATA_TRANSFER,cumulativeAck,listOfNacksCtr, senderPktHdr->seqNum);
                                 /* Send response per RESPONSE_BURST_SIZE */
                                 gettimeofday(&curTime, NULL);
-                                if(burstCtr++ == RESPONSE_BURST_SIZE || respPktHdr->numOfNacks > 0) {
-                                /* if(computeDiff(curTime, burstStartTime) > RESPONSE_BURST_TIME) { */
+                                if((burstCtr++ == RESPONSE_BURST_SIZE)
+                                        || (computeDiff(curTime, burstStartTime) > RESPONSE_BURST_TIME)) {
+                                /* if() { */
                                     sendto_dbg(ss, respPkt, respPktHdr->numOfNacks * sizeof (int) + sizeof (RespPacketHeader), 0,
                                             (struct sockaddr *) & curSenderAddr, sizeof (curSenderAddr));
                                     burstCtr = 1; 
-                                    /* gettimeofday(&burstStartTime, NULL); */
-                                    printf("Sent Response packet : "); printRespPacket(respPkt);
+                                    gettimeofday(&burstStartTime, NULL);
+                                    myprintf("Sent Response packet : "); printRespPacket(respPkt);
                                 } else {
-                                    printf("%d: Built Response packet : ", computeDiff(curTime, burstStartTime)); printRespPacket(respPkt);
+                                    myprintf("%d: Built Response packet : ", computeDiff(curTime, burstStartTime)); printRespPacket(respPkt);
                                 }
                             }
                         }
@@ -327,6 +328,7 @@ int main(int argc, char **argv)
                         sendto_dbg(ss, respPkt, respPktHdr->numOfNacks*sizeof(int) + sizeof (RespPacketHeader), 0,
                                 (struct sockaddr *) & curSenderAddr, sizeof (curSenderAddr));
                         isFileTransferInProgress = 0;
+                        printf("ACK_FINISHED sent to %x ", curSenderAddr.sin_addr.s_addr);
                         /* Pick the next one from the queue */
                         if(!isQueueEmpty(&queueSize)) {
                             curSenderAddr = fetchNextAddrFromQueue(addrQueue, &addrQueueStart, &queueSize);
@@ -343,6 +345,9 @@ int main(int argc, char **argv)
                 } else {
                     if(senderPktHdr->packetType == INIT_FILE_TRANSFER) {
                         /* Send Busy */
+                        from_addr.sin_family = AF_INET;
+                        from_addr.sin_port = htons(PORT);
+
                         prepareRespPacketHdr(respPktHdr, INIT_FILE_TRANSFER_BUSY, 0, 0, 0);
                         sendto_dbg(ss, respPkt, respPktHdr->numOfNacks*sizeof(int) + sizeof (RespPacketHeader), 0,
                                 (struct sockaddr *) & from_addr, sizeof (from_addr));
@@ -353,6 +358,7 @@ int main(int argc, char **argv)
                         prepareRespPacketHdr(respPktHdr, ACK_FINISHED, 0, 0, 0);
                         sendto_dbg(ss, respPkt, respPktHdr->numOfNacks*sizeof(int) + sizeof (RespPacketHeader), 0,
                                 (struct sockaddr *) & from_addr, sizeof (from_addr));
+                        printf("ACK_FINISHED sent to %x ", from_addr.sin_addr.s_addr);
                     }
                     
                 }
@@ -361,9 +367,9 @@ int main(int argc, char **argv)
             if(isFileTransferInProgress == 1) {
                 sendto_dbg(ss, respPkt, respPktHdr->numOfNacks * sizeof (int) + sizeof (RespPacketHeader), 0,
                         (struct sockaddr *) & curSenderAddr, sizeof (curSenderAddr));
-                printf("Resending Response packet : "); printRespPacket(respPkt);
+                myprintf("Resending Response packet : "); printRespPacket(respPkt);
             }
-            printf(".");
+            myprintf(".");
             fflush(0);
         }
     }
@@ -377,9 +383,9 @@ void PromptForHostName( char *my_name, char *host_name, size_t max_len ) {
     char *c;
 
     gethostname(my_name, max_len );
-    printf("My host name is %s.\n", my_name);
+    myprintf("My host name is %s.\n", my_name);
 
-    printf( "\nEnter host to send to:\n" );
+    myprintf( "\nEnter host to send to:\n" );
     if ( fgets(host_name,max_len,stdin) == NULL ) {
         perror("Ucast: read_name");
         exit(1);
@@ -390,6 +396,6 @@ void PromptForHostName( char *my_name, char *host_name, size_t max_len ) {
     c = strchr(host_name,'\r');
     if ( c ) *c = '\0';
 
-    printf( "Sending from %s to %s.\n", my_name, host_name );
+    myprintf( "Sending from %s to %s.\n", my_name, host_name );
 
 }
