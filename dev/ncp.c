@@ -169,9 +169,11 @@ int main(int argc, char **argv) {
     int lastSeqNumSent = -1;
     int maxSendRemaining;
     int totalLength;
-    struct timeval beginTime, endTime;
+    struct timeval beginTime, endTime, statEndTime, statStartTime;
     int isResendNacks = 0;
     int lossrate;
+    int countWindows=0;
+    int flag=1;
 
     /*    RespPacketHeader respPktHdr;
         int listOfNacks[WINDOW_SIZE];*/
@@ -329,16 +331,39 @@ int main(int argc, char **argv) {
                     }
                     /* If CumulativeAck is same as the seq num corresponding to startWindowIdx, then slide. */
                     if (isCumulativeAckInsideWindow(respPktHdr->cumulativeAck, startWindowIdx, window)) {
+                       if (flag==1) {
+                            gettimeofday(&statStartTime, NULL);
+                            flag=0;
+                        }
                         isResendNacks = 1;
                         while (getSeqNum(window[startWindowIdx].sendPkt) != respPktHdr->cumulativeAck) {
                             window[startWindowIdx].isSpaceUsed = 0;
+                            window[startWindowIdx].isResent = 0;
                             incrementWindowIdx(&startWindowIdx);
                             maxSendRemaining++;
+                            countWindows++;
+                            if ((countWindows * MAX_DATA_LENGTH) % (20 * 1024 * 1024) == 0) {
+                                flag=1;
+                                /* Print statistics */
+                                printf("Total Amount of Data Successfully Sent = %d kBytes. \n", countWindows * MAX_DATA_LENGTH);
+                                gettimeofday(&statEndTime, NULL);
+                                printf("Transfer rate for last 20MBytes = %.3f Mbits/sec. \n", ((double) (20 * 8 * 1000)) / (computeDiff(statEndTime, statStartTime)));
+                            }
                         }
                         window[startWindowIdx].isSpaceUsed = 0;
                         window[startWindowIdx].isResent = 0;
                         incrementWindowIdx(&startWindowIdx);
                         maxSendRemaining++;
+
+                        countWindows++;
+                        if ((countWindows * MAX_DATA_LENGTH) % (20 * 1024 * 1024) == 0) {
+                            flag=1;
+                            /* Print statistics */
+                            printf("Total Amount of Data Successfully Sent = %d kBytes. \n", countWindows * MAX_DATA_LENGTH);
+                            gettimeofday(&statEndTime, NULL);
+                            printf("Transfer rate for last 20MBytes = %.3f Mbits/sec. \n", ((double) (20 * 8 * 1000)) / (computeDiff(statEndTime, statStartTime)));
+                        }
+                        
                     }
                     if (lastSeqNumSent == respPktHdr->cumulativeAck && feof(fr)) {
                         printf("Breaking \n");
