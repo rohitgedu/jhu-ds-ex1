@@ -21,8 +21,8 @@ int main() {
     char mess_buf[MAX_MESS_LEN];
     long on = 1;
     int totalBytesRead = 0;
-
-
+    int totalWritten=0;
+   
     FILE *fw; /* Pointer to dest file, which we write  */
     int nwritten, bytes;
     struct timeval beginTime, endTime;
@@ -58,7 +58,7 @@ int main() {
         exit(0);
     }
 
-    gettimeofday(&(beginTime), NULL);
+   
     i = 0;
     FD_ZERO(&mask);
     FD_ZERO(&dummy_mask);
@@ -76,6 +76,7 @@ int main() {
             for (j = 0; j < i; j++) {
                 if (valid[j])
                     if (FD_ISSET(recv_s[j], &temp_mask)) {
+                        gettimeofday(&(beginTime), NULL);
                         bytes = recv(recv_s[j], &mess_len, sizeof (mess_len), 0);
                         if (bytes > 0) {
                             neto_len = mess_len - sizeof (mess_len);
@@ -84,10 +85,18 @@ int main() {
                                 bytes = recv(recv_s[j], mess_buf + totalBytesRead, neto_len - totalBytesRead, 0);
                                 totalBytesRead += bytes;
                             }
+                            
                             nwritten = fwrite(mess_buf, 1, totalBytesRead, fw);
+                            totalWritten+= nwritten;
+                            if(totalWritten%(20*1024*1024)==0){
+                            printf("Total Amount of Data Successfully Received = %d kBytes. \n", totalWritten/1024);
+                            gettimeofday(&endTime, NULL);
+                            printf("Transfer rate for last 20MBytes = %.3f Mbits/sec. \n", ((double) (20 * 8 * 1000)) / (computeDiff(endTime, beginTime)));
+                            }
+
                         } else {
-                            gettimeofday(&(endTime), NULL);
-                            printf("Time taken in milliseconds :%ld", computeDiff(endTime, beginTime));
+                             gettimeofday(&endTime, NULL);
+                             printf("Total time taken: %ld milliseconds. \n", (computeDiff(endTime, beginTime)));
                             printf("closing %d \n", j);
                             FD_CLR(recv_s[j], &mask);
                             close(recv_s[j]);
