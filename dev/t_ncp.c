@@ -8,7 +8,7 @@ long int computeDiff(struct timeval tv1, struct timeval tv2) {
     return milliSecDiff;
 }
 
-int main()
+int main(int argc, char **argv)
 {
     struct sockaddr_in host;
     struct hostent     h_ent, *p_h_ent;
@@ -27,10 +27,15 @@ int main()
 
     int totalSent=0;
     int totalSuccessfullySent=0;
-    struct timeval beginTime, endTime;
+    struct timeval beginTime, endTime, progBeginTime;
+
+    if(argc != 3) {
+	printf("Usage: t_ncp <source_file_path> <servername>\n");
+	exit(1);
+    }    
 
      /* Open the source file for reading */
-    if ((fr = fopen("/tmp/archlinux-2011.08.19-core-x86_64.iso", "r")) == NULL) {
+    if ((fr = fopen(argv[1], "r")) == NULL) {
         perror("fopen");
         exit(0);
     }
@@ -45,19 +50,12 @@ int main()
     host.sin_family = AF_INET;
     host.sin_port   = htons(PORT);
 
-    printf("Enter the server name:\n");
-    if ( fgets(host_name,80,stdin) == NULL ) {
-        perror("net_client: Error reading server name.\n");
-        exit(1);
-    }
-    c = strchr(host_name,'\n'); /* remove new line */
+    c = strchr(argv[2],'\n'); /* remove new line */
     if ( c ) *c = '\0';
-    c = strchr(host_name,'\r'); /* remove carriage return */
-
+    c = strchr(argv[2],'\r'); /* remove carriage return */
     if ( c ) *c = '\0';
-        printf("Your server is %s\n",host_name);
 
-    p_h_ent = gethostbyname(host_name);
+    p_h_ent = gethostbyname(argv[2]);
     if ( p_h_ent == NULL ) {
         printf("net_client: gethostbyname error.\n");
         exit(1);
@@ -73,6 +71,8 @@ int main()
         exit(1);
     }
     gettimeofday(&(beginTime), NULL);
+    gettimeofday(&progBeginTime, NULL);
+
     for(;;)
     {
          /* Read in a chunk of the file */
@@ -88,12 +88,13 @@ int main()
             gettimeofday(&endTime, NULL);
             printf("Transfer rate for last 20MBytes = %.3f Mbits/sec. \n", ((double) (20 * 8 * 1000)) / (computeDiff(endTime, beginTime)));
             totalSent=0;
+            gettimeofday(&beginTime, NULL);
                       
         }
 
         if (nread < BUF_SIZE) {
             gettimeofday(&(endTime), NULL);
-            printf("Time taken :%ld ms\n", computeDiff(endTime, beginTime));
+            printf("Time taken :%ld ms\n", computeDiff(endTime, progBeginTime));
             /* Did we reach the EOF? */
             if (feof(fr)) {
                 printf("Finished writing.\n");
