@@ -2,6 +2,12 @@
 
 #define BUF_SIZE 1024
 
+long int computeDiff(struct timeval tv1, struct timeval tv2) {
+    long int milliSecDiff = 1;
+    milliSecDiff = (tv1.tv_sec * 1000 + tv1.tv_usec / 1000) - (tv2.tv_sec * 1000 + tv2.tv_usec / 1000);
+    return milliSecDiff;
+}
+
 int main()
 {
     struct sockaddr_in host;
@@ -17,7 +23,11 @@ int main()
     char               *neto_mess_ptr = &mess_buf[sizeof (mess_len)];
     FILE                *fr; /* Pointer to source file, which we read */
     int                 nread;
-    
+
+
+    int totalSent=0;
+    int totalSuccessfullySent=0;
+    struct timeval beginTime, endTime;
 
      /* Open the source file for reading */
     if ((fr = fopen("/tmp/archlinux-2011.08.19-core-x86_64.iso", "r")) == NULL) {
@@ -62,18 +72,28 @@ int main()
         perror( "Net_client: could not connect to server"); 
         exit(1);
     }
-
+    gettimeofday(&(beginTime), NULL);
     for(;;)
     {
          /* Read in a chunk of the file */
+        
         nread = fread(neto_mess_ptr, 1, BUF_SIZE, fr);
         mess_len = nread + sizeof(mess_len);
         memcpy( mess_buf, &mess_len, sizeof(mess_len));
         ret = send( s, mess_buf, mess_len, 0);
+        totalSent += mess_len;
+        totalSuccessfullySent+=mess_len;
+        if (totalSent >(20 * 1024 * 1024)) {
+            printf("Total Amount of Data Successfully Sent = %d kBytes. \n", totalSuccessfullySent / 1024);
+            gettimeofday(&endTime, NULL);
+            printf("Transfer rate for last 20MBytes = %.3f Mbits/sec. \n", ((double) (20 * 8 * 1000)) / (computeDiff(endTime, beginTime)));
+            totalSent=0;
+                      
+        }
 
-        
         if (nread < BUF_SIZE) {
-
+            gettimeofday(&(endTime), NULL);
+            printf("Time taken :%ld ms\n", computeDiff(endTime, beginTime));
             /* Did we reach the EOF? */
             if (feof(fr)) {
                 printf("Finished writing.\n");
