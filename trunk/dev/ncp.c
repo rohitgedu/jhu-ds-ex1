@@ -243,6 +243,10 @@ int main(int argc, char **argv) {
     /* Send a Init File Transfer packet */
     prepareSendPacketHdr(sendPktHdr, INIT_FILE_TRANSFER, 0, strlen(destFileName));
     memcpy(sendPkt + sizeof (SendPacketHeader), destFileName, strlen(destFileName));
+    printf("%d %x %x \n", strlen(destFileName)
+            , sendPkt
+            , sendPkt + sizeof (SendPacketHeader) + strlen(destFileName) + 1);
+    sendPkt[sizeof(SendPacketHeader) + strlen(destFileName)] = 0;
     printPacket(sendPkt);
     myprintf("Sending file: %s", sendPkt + sizeof (SendPacketHeader));
     sendto_dbg(ss, sendPkt, sendPktHdr->length + sizeof (SendPacketHeader), 0,
