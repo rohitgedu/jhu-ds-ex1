@@ -5,6 +5,13 @@
 #define ADDR_QUEUE_SIZE 20
 #define RESPONSE_BURST_SIZE 25
 #define RESPONSE_BURST_TIME 5 /* in mill seconds */
+#define MAX_FILE_NAME_LENGTH 80
+
+struct QueueElem {
+    struct sockaddr_in addr;
+    char destFileName[MAX_FILE_NAME_LENGTH];
+};
+typedef struct QueueElem QueueElem;
 
 int gethostname(char*, size_t);
 
@@ -46,12 +53,12 @@ int isQueueEmpty(int *queueSize) {
     return (*queueSize == 0);
 }
 
-int isExists(struct sockaddr_in *addrQueue, int *addrQueueStart, int *queueSize, 
+int isExists(QueueElem *sendersQueue, int *addrQueueStart, int *queueSize,
         struct sockaddr_in addrToAdd) {
     int idx = *addrQueueStart;
     int count = 0;
     while(count++ < *queueSize) {
-        if(addrQueue[idx].sin_addr.s_addr == addrToAdd.sin_addr.s_addr) {
+        if(sendersQueue[idx].addr.sin_addr.s_addr == addrToAdd.sin_addr.s_addr) {
             return 1;
         }
         idx = incrementQueueIdx(idx, 1);
@@ -59,21 +66,23 @@ int isExists(struct sockaddr_in *addrQueue, int *addrQueueStart, int *queueSize,
     return 0;
 }
 
-struct sockaddr_in addAddrIntoQueue(struct sockaddr_in *addrQueue, int *addrQueueStart, int *queueSize, 
-        struct sockaddr_in addrToAdd) {
+struct sockaddr_in addAddrIntoQueue(QueueElem *sendersQueue, int *queueStart, int *queueSize,
+        struct sockaddr_in addrToAdd, char *destFileName) {
     int idx;
-    if(!isExists(addrQueue, addrQueueStart, queueSize, addrToAdd)) {
-        idx = incrementQueueIdx(*addrQueueStart, *queueSize);
-        addrQueue[idx] = addrToAdd;
+    if(!isExists(sendersQueue, queueStart, queueSize, addrToAdd)) {
+        idx = incrementQueueIdx(*queueStart, *queueSize);
+        sendersQueue[idx].addr = addrToAdd;
+        memcpy(sendersQueue[idx].destFileName, destFileName, strlen(destFileName));
+        sendersQueue[idx].destFileName[strlen(destFileName)] = 0;
         (*queueSize)++;
     }
 };
 
-struct sockaddr_in fetchNextAddrFromQueue(struct sockaddr_in *addrQueue, int *addrQueueStart, int *queueSize) {
-    struct sockaddr_in retAddr = addrQueue[*addrQueueStart];
-    *addrQueueStart = incrementQueueIdx(*addrQueueStart, 1);
+QueueElem fetchNextAddrFromQueue(QueueElem *sendersQueue, int *queueStart, int *queueSize) {
+    QueueElem retQueueElem = sendersQueue[*queueStart];
+    *queueStart = incrementQueueIdx(*queueStart, 1);
     (*queueSize)--;
-    return retAddr;
+    return retQueueElem;
 };
 
 void incrementBufferIdx(int* bufferIdx) {
@@ -140,7 +149,7 @@ int main(int argc, char **argv)
     int                   totalElementsInTheWindowToCheck;
     int                   listOfNacksCtr;
     int                   burstCtr = 1;
-    struct sockaddr_in    tempSenderAddr;
+    QueueElem             tempQueueElem;
     int                   totalBytesReceived = 0;
     int                   isFirstWrite = 1;
 
@@ -161,7 +170,7 @@ int main(int argc, char **argv)
     int tempCtr;
     
 
-    struct sockaddr_in addrQueue[ADDR_QUEUE_SIZE];
+    QueueElem sendersQueue[ADDR_QUEUE_SIZE];
     int addrQueueStart = 0, queueSize = 0;
 
     BufferElement buffer[WINDOW_SIZE];
@@ -239,11 +248,26 @@ int main(int argc, char **argv)
                             perror("fopen");
                             /* Error occured, so pick the next one from the queue */
                             if(!isQueueEmpty(&queueSize)) {
-                                tempSenderAddr = fetchNextAddrFromQueue(addrQueue, &addrQueueStart, &queueSize);
-                                curSenderAddr.sin_addr.s_addr = tempSenderAddr.sin_addr.s_addr;
+                                tempQueueElem = fetchNextAddrFromQueue(sendersQueue, &addrQueueStart, &queueSize);
+                                fw = fopen(tempQueueElem.destFileName, "w");
+                                curSenderAddr = zeroAddr; /* reinitialize curSenderAddr to 0 */
+                                curSenderAddr.sin_addr.s_addr = tempQueueElem.addr.sin_addr.s_addr;
                                 prepareRespPacketHdr(respPktHdr, INIT_FILE_TRANSFER_READY, 0, 0, 0);
                                 sendto_dbg(ss, respPkt, respPktHdr->numOfNacks*sizeof(int) + sizeof (RespPacketHeader), 0,
                                         (struct sockaddr *) & curSenderAddr, sizeof (curSenderAddr));
+
+                                /* reinitialize all variables */
+                                startBufferIdx = 0;
+                                isFileTransferInProgress = 1;
+                                isHighestSeqNumSeenDuringWindowSlide = 0;
+                                highestSeqNumInWindow = 0;
+                                isHighestSeqNumRecomputeRequired = 1;
+                                listOfNacksCtr = 0;
+                                burstCtr = 1;
+                                totalBytesReceived = 0;
+                                isFirstWrite = 1;
+                                gettimeofday(&curTime, NULL);
+                                cumulativeAck = SEQUENCE_SIZE - 1;
                             }
                             continue;
                         }
@@ -251,6 +275,8 @@ int main(int argc, char **argv)
                         prepareRespPacketHdr(respPktHdr, INIT_FILE_TRANSFER_READY, 0, 0, 0);
                         sendto_dbg(ss, respPkt, respPktHdr->numOfNacks*sizeof(int) + sizeof (RespPacketHeader), 0,
                                 (struct sockaddr *) & curSenderAddr, sizeof (curSenderAddr));
+                        printf("File transfer from [%x] with file name [%s] initiated...\n",
+                                    from_addr.sin_addr.s_addr, senderPkt + sizeof(SendPacketHeader));
                         isFileTransferInProgress = 1;
                         gettimeofday(&burstStartTime, NULL);
                         isFirstWrite = 1;
@@ -337,16 +363,28 @@ int main(int argc, char **argv)
                         printf("ACK_FINISHED sent to %x \n", curSenderAddr.sin_addr.s_addr);
                         /* Pick the next one from the queue */
                         if(!isQueueEmpty(&queueSize)) {
-                            tempSenderAddr = fetchNextAddrFromQueue(addrQueue, &addrQueueStart, &queueSize);
+                            tempQueueElem = fetchNextAddrFromQueue(sendersQueue, &addrQueueStart, &queueSize);
+                            fw = fopen(tempQueueElem.destFileName, "w");
                             curSenderAddr = zeroAddr; /* reinitialize curSenderAddr to 0 */
-                            curSenderAddr.sin_addr.s_addr = tempSenderAddr.sin_addr.s_addr;
+                            curSenderAddr.sin_addr.s_addr = tempQueueElem.addr.sin_addr.s_addr;
                             prepareRespPacketHdr(respPktHdr, INIT_FILE_TRANSFER_READY, 0, 0, 0);
                             sendto_dbg(ss, respPkt, respPktHdr->numOfNacks*sizeof(int) + sizeof (RespPacketHeader), 0,
                                     (struct sockaddr *) & curSenderAddr, sizeof (curSenderAddr));
                             isFileTransferInProgress = 1;
+                            /* reinitialize all variables */
                             gettimeofday(&burstStartTime, NULL);
+                            startBufferIdx = 0;
+                            isFileTransferInProgress = 1;
+                            isHighestSeqNumSeenDuringWindowSlide = 0;
+                            highestSeqNumInWindow = 0;
+                            isHighestSeqNumRecomputeRequired = 1;
+                            listOfNacksCtr = 0;
                             burstCtr = 1;
+                            totalBytesReceived = 0;
                             isFirstWrite = 1;
+                            gettimeofday(&curTime, NULL);
+                            cumulativeAck = SEQUENCE_SIZE - 1;
+
                         } else {
                             curSenderAddr = zeroAddr; /* reinitialize curSenderAddr to 0 */
                         }
@@ -361,7 +399,12 @@ int main(int argc, char **argv)
                         sendto_dbg(ss, respPkt, respPktHdr->numOfNacks*sizeof(int) + sizeof (RespPacketHeader), 0,
                                 (struct sockaddr *) & from_addr, sizeof (from_addr));
                         if(!isQueueFull(&queueSize)) {
-                            addAddrIntoQueue(addrQueue, &addrQueueStart, &queueSize, from_addr);
+                            senderPkt[sizeof(SendPacketHeader) + senderPktHdr->length] = 0;
+                            addAddrIntoQueue(sendersQueue, &addrQueueStart, &queueSize, from_addr,
+                                    senderPkt + sizeof(SendPacketHeader));
+                            printf("File transfer from [%x] with file name [%s] Queued...\n",
+                                        from_addr.sin_addr.s_addr, senderPkt + sizeof(SendPacketHeader));
+
                         }
                     } else if(senderPktHdr->packetType == FILE_FINISH) {
                         from_addr.sin_family = AF_INET;
