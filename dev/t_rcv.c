@@ -8,7 +8,7 @@ long int computeDiff(struct timeval tv1, struct timeval tv2) {
     return milliSecDiff;
 }
 
-int main() {
+int main(int argc, char **argv) {
     struct sockaddr_in name;
     int s;
     fd_set mask;
@@ -22,10 +22,11 @@ int main() {
     long on = 1;
     int totalBytesRead = 0;
     int totalWritten=0;
+    int tempTotalWritten = 0;
    
     FILE *fw; /* Pointer to dest file, which we write  */
     int nwritten, bytes;
-    struct timeval beginTime, endTime;
+    struct timeval beginTime, endTime, progBeginTime;
 
     s = socket(AF_INET, SOCK_STREAM, 0);
     if (s < 0) {
@@ -52,14 +53,20 @@ int main() {
         exit(1);
     }
 
+    if(argc != 2) {
+        printf("Usage: t_rcv <destination_filepath_with_name>\n");
+        exit(1);
+    }
     /* Open or create the destination file for writing */
-    if ((fw = fopen("/tmp/ar/archlinux-2011.08.19-core-x86_64.iso", "w")) == NULL) {
+    if ((fw = fopen(argv[1], "w")) == NULL) {
         perror("fopen");
         exit(0);
     }
 
    
     i = 0;
+    gettimeofday(&(beginTime), NULL);
+    gettimeofday(&(progBeginTime), NULL);
     FD_ZERO(&mask);
     FD_ZERO(&dummy_mask);
     FD_SET(s, &mask);
@@ -76,7 +83,6 @@ int main() {
             for (j = 0; j < i; j++) {
                 if (valid[j])
                     if (FD_ISSET(recv_s[j], &temp_mask)) {
-                        gettimeofday(&(beginTime), NULL);
                         bytes = recv(recv_s[j], &mess_len, sizeof (mess_len), 0);
                         if (bytes > 0) {
                             neto_len = mess_len - sizeof (mess_len);
@@ -87,21 +93,25 @@ int main() {
                             }
                             
                             nwritten = fwrite(mess_buf, 1, totalBytesRead, fw);
-                            totalWritten+= nwritten;
-                            if(totalWritten%(20*1024*1024)==0){
-                            printf("Total Amount of Data Successfully Received = %d kBytes. \n", totalWritten/1024);
-                            gettimeofday(&endTime, NULL);
-                            printf("Transfer rate for last 20MBytes = %.3f Mbits/sec. \n", ((double) (20 * 8 * 1000)) / (computeDiff(endTime, beginTime)));
+                            tempTotalWritten+= nwritten;
+                            if(tempTotalWritten >= 20*1024*1024){
+                                printf("Total Amount of Data Successfully Received = %d kBytes. \n", totalWritten/1024);
+                                gettimeofday(&endTime, NULL);
+                                printf("Transfer rate for last 20MBytes = %.3f Mbits/sec. \n", ((double) (20 * 8 * 1000)) / (computeDiff(endTime, beginTime)));
+	                        gettimeofday(&(beginTime), NULL);
+				totalWritten+=tempTotalWritten;
+				tempTotalWritten = 0;
                             }
 
                         } else {
                              gettimeofday(&endTime, NULL);
-                             printf("Total time taken: %ld milliseconds. \n", (computeDiff(endTime, beginTime)));
+                             printf("Total time taken: %ld milliseconds. \n", (computeDiff(endTime, progBeginTime)));
                             printf("closing %d \n", j);
                             FD_CLR(recv_s[j], &mask);
                             close(recv_s[j]);
                             fclose(fw);
                             valid[j] = 0;
+			    exit(0);
                         }
                     }
             }
